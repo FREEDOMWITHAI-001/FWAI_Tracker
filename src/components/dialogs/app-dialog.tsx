@@ -40,6 +40,8 @@ export function AppDialog({
     check_url: initial?.check_url ?? '',
     check_host: initial?.check_host ?? '',
     check_port: initial?.check_port ?? ('' as number | ''),
+    alert_name: initial?.alert_name ?? '',
+    alert_phone: initial?.alert_phone ?? '',
   });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -65,6 +67,8 @@ export function AppDialog({
         check_url: form.check_url?.trim() || null,
         check_host: form.check_host?.trim() || null,
         check_port: form.check_port === '' || form.check_port == null ? null : Number(form.check_port),
+        alert_name: form.alert_name?.trim() || null,
+        alert_phone: form.alert_phone?.trim() || null,
       };
       if (editing) await api.patch(`/api/apps/${initial!.id}`, body);
       else await api.post('/api/apps', body);
@@ -151,6 +155,14 @@ export function AppDialog({
         </Field>
       </div>
 
+      <div className="field-row">
+        <Field label="Alert contact name (optional)" hint="Defaults to the client's contact if blank.">
+          <input className="input" value={form.alert_name ?? ''} onChange={(e) => set('alert_name', e.target.value)} placeholder="Dev on-call" />
+        </Field>
+        <Field label="Alert WhatsApp (optional)" hint="With country code, e.g. +91XXXXXXXXXX.">
+          <input className="input" value={form.alert_phone ?? ''} onChange={(e) => set('alert_phone', e.target.value)} placeholder="+919999999999" />
+        </Field>
+      </div>
       <div className="hint" style={{ color: 'var(--faint)', fontSize: 11.5 }}>
         Response time and status fill in automatically when the app is checked — you don&apos;t enter them by hand.
       </div>

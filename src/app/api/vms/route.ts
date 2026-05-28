@@ -1,7 +1,7 @@
 import { supabaseAdmin } from '@/lib/supabase';
 import { ok, bad, guard } from '@/lib/api';
 
-const VM_FIELDS = ['client_id', 'name', 'provider', 'region', 'status', 'cpu', 'mem', 'disk', 'uptime_label', 'health_url', 'host', 'port'] as const;
+const VM_FIELDS = ['client_id', 'name', 'provider', 'region', 'status', 'cpu', 'mem', 'disk', 'uptime_label', 'health_url', 'host', 'port', 'alert_name', 'alert_phone'] as const;
 
 // GET /api/vms -> all VMs with the client name attached
 export async function GET() {

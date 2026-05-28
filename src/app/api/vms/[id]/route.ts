@@ -2,7 +2,7 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { ok, bad, guard } from '@/lib/api';
 
 type Ctx = { params: Promise<{ id: string }> };
-const VM_FIELDS = ['name', 'provider', 'region', 'status', 'cpu', 'mem', 'disk', 'uptime_label', 'health_url', 'host', 'port'] as const;
+const VM_FIELDS = ['name', 'provider', 'region', 'status', 'cpu', 'mem', 'disk', 'uptime_label', 'health_url', 'host', 'port', 'alert_name', 'alert_phone'] as const;
 
 // GET /api/vms/[id] -> one VM with its client name
 export async function GET(_req: Request, { params }: Ctx) {

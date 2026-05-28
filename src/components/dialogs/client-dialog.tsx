@@ -16,6 +16,8 @@ export function ClientDialog({
 }) {
   const [name, setName] = useState(initial?.name ?? '');
   const [industry, setIndustry] = useState(initial?.industry ?? '');
+  const [alertName, setAlertName] = useState(initial?.alert_name ?? '');
+  const [alertPhone, setAlertPhone] = useState(initial?.alert_phone ?? '');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const editing = !!initial;
@@ -25,7 +27,12 @@ export function ClientDialog({
     setBusy(true);
     setErr('');
     try {
-      const body = { name: name.trim(), industry: industry.trim() || null };
+      const body = {
+        name: name.trim(),
+        industry: industry.trim() || null,
+        alert_name: alertName.trim() || null,
+        alert_phone: alertPhone.trim() || null,
+      };
       if (editing) await api.patch(`/api/clients/${initial!.id}`, body);
       else await api.post('/api/clients', body);
       onSaved();
@@ -58,6 +65,14 @@ export function ClientDialog({
       <Field label="Industry" hint="Optional — shown on the client list and detail header.">
         <input className="input" value={industry ?? ''} onChange={(e) => setIndustry(e.target.value)} placeholder="e.g. Healthcare" />
       </Field>
+      <div className="field-row">
+        <Field label="Alert contact name" hint="Who to notify if this client's VMs/apps go down.">
+          <input className="input" value={alertName ?? ''} onChange={(e) => setAlertName(e.target.value)} placeholder="e.g. Dev on-call" />
+        </Field>
+        <Field label="Alert WhatsApp number" hint="With country code, e.g. +91XXXXXXXXXX. Used unless a project sets its own.">
+          <input className="input" value={alertPhone ?? ''} onChange={(e) => setAlertPhone(e.target.value)} placeholder="+919999999999" />
+        </Field>
+      </div>
     </Modal>
   );
 }

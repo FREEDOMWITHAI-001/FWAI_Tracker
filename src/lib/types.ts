@@ -8,6 +8,8 @@ export interface Client {
   id: string;
   name: string;
   industry: string | null;
+  alert_name: string | null;
+  alert_phone: string | null;
   created_at: string;
 }
 
@@ -30,6 +32,10 @@ export interface VM {
   cloud_account_id: string | null;
   external_id: string | null;
   source: 'manual' | 'cloud';
+  alert_name: string | null;
+  alert_phone: string | null;
+  down_since: string | null;
+  alerted: boolean;
   created_at: string;
 }
 
@@ -73,6 +79,10 @@ export interface App {
   check_port: number | null;
   last_checked_at: string | null;
   last_response_ms: number | null;
+  alert_name: string | null;
+  alert_phone: string | null;
+  down_since: string | null;
+  alerted: boolean;
   created_at: string;
 }
 

@@ -36,6 +36,8 @@ export function VMDialog({
     host: initial?.host ?? '',
     port: initial?.port ?? ('' as number | ''),
     health_url: initial?.health_url ?? '',
+    alert_name: initial?.alert_name ?? '',
+    alert_phone: initial?.alert_phone ?? '',
   });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -60,6 +62,8 @@ export function VMDialog({
         host: form.host?.trim() || null,
         port: form.port === '' || form.port == null ? null : Number(form.port),
         health_url: form.health_url?.trim() || null,
+        alert_name: form.alert_name?.trim() || null,
+        alert_phone: form.alert_phone?.trim() || null,
       };
       if (editing) await api.patch(`/api/vms/${initial!.id}`, body);
       else await api.post('/api/vms', body);
@@ -140,6 +144,14 @@ export function VMDialog({
       <Field label="Uptime label (optional)" hint='Free text, e.g. "42d 6h".'>
         <input className="input" value={form.uptime_label ?? ''} onChange={(e) => set('uptime_label', e.target.value)} placeholder="42d 6h" />
       </Field>
+      <div className="field-row">
+        <Field label="Alert contact name (optional)" hint="Defaults to the client's contact if blank.">
+          <input className="input" value={form.alert_name ?? ''} onChange={(e) => set('alert_name', e.target.value)} placeholder="Dev on-call" />
+        </Field>
+        <Field label="Alert WhatsApp (optional)" hint="With country code, e.g. +91XXXXXXXXXX.">
+          <input className="input" value={form.alert_phone ?? ''} onChange={(e) => set('alert_phone', e.target.value)} placeholder="+919999999999" />
+        </Field>
+      </div>
 
       <div className="hint" style={{ color: 'var(--faint)', fontSize: 11.5, marginTop: 2 }}>
         CPU, memory and disk aren&apos;t entered here — they fill in automatically from a connected cloud account or a Health

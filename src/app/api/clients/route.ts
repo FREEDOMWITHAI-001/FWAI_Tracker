@@ -43,7 +43,7 @@ export async function POST(req: Request) {
     const db = supabaseAdmin();
     const { data, error } = await db
       .from('clients')
-      .insert({ name: body.name, industry: body.industry ?? null })
+      .insert({ name: body.name, industry: body.industry ?? null, alert_name: body.alert_name ?? null, alert_phone: body.alert_phone ?? null })
       .select()
       .single();
     if (error) return bad(error.message, 500);

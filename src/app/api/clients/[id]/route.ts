@@ -28,6 +28,8 @@ export async function PATCH(req: Request, { params }: Ctx) {
     const patch: Record<string, unknown> = {};
     if (body.name !== undefined) patch.name = body.name;
     if (body.industry !== undefined) patch.industry = body.industry;
+    if (body.alert_name !== undefined) patch.alert_name = body.alert_name;
+    if (body.alert_phone !== undefined) patch.alert_phone = body.alert_phone;
     const db = supabaseAdmin();
     const { data, error } = await db
       .from('clients')

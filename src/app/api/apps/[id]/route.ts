@@ -2,7 +2,7 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { ok, bad, guard } from '@/lib/api';
 
 type Ctx = { params: Promise<{ id: string }> };
-const APP_FIELDS = ['vm_id', 'name', 'type', 'host', 'status', 'resp_ms', 'health', 'uptime', 'check_url', 'check_host', 'check_port'] as const;
+const APP_FIELDS = ['vm_id', 'name', 'type', 'host', 'status', 'resp_ms', 'health', 'uptime', 'check_url', 'check_host', 'check_port', 'alert_name', 'alert_phone'] as const;
 
 // GET /api/apps/[id] -> one app with its client name
 export async function GET(_req: Request, { params }: Ctx) {

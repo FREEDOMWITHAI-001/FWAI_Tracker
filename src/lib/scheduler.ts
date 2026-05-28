@@ -1,6 +1,7 @@
 import { supabaseAdmin } from './supabase';
 import { checkVm, checkApp } from './checks';
 import { syncCloudAccount } from './cloud-sync';
+import { runAlerts } from './alerts';
 
 // Server-side scheduler. Started from instrumentation.ts when the Next server
 // boots, so checks run automatically even with no browser open. Stops when the
@@ -26,6 +27,9 @@ async function runChecks() {
       .select('id,check_url,check_host,check_port')
       .or('check_url.not.is.null,check_port.not.is.null');
     await Promise.all((apps ?? []).map((a) => checkApp(db, a as any).catch(() => {})));
+
+    // after fresh statuses are written, evaluate alert conditions
+    await runAlerts(db).catch((e) => console.error('[alerts] failed:', e?.message));
   } catch (e) {
     console.error('[scheduler] checks failed:', e instanceof Error ? e.message : e);
   } finally {
