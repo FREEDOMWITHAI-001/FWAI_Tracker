@@ -39,7 +39,7 @@ export interface VM {
   created_at: string;
 }
 
-export type Cloud = 'aws' | 'azure' | 'gcp';
+export type Cloud = 'aws' | 'azure' | 'gcp' | 'oci';
 
 export interface CloudAccount {
   id: string;

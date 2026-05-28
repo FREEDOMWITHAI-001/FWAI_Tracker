@@ -31,6 +31,13 @@ export function CloudAccountDialog({
   const [azSub, setAzSub] = useState('');
   // gcp
   const [gcpJson, setGcpJson] = useState('');
+  // oci
+  const [ociTenancy, setOciTenancy] = useState('');
+  const [ociUser, setOciUser] = useState('');
+  const [ociFingerprint, setOciFingerprint] = useState('');
+  const [ociRegion, setOciRegion] = useState('ap-mumbai-1');
+  const [ociCompartment, setOciCompartment] = useState('');
+  const [ociKey, setOciKey] = useState('');
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -57,7 +64,7 @@ export function CloudAccountDialog({
     } else if (tab === 'azure') {
       if (!azTenant.trim() || !azClient.trim() || !azSecret.trim() || !azSub.trim()) return setErr('Fill in all Azure fields.');
       credentials = { tenantId: azTenant.trim(), clientId: azClient.trim(), clientSecret: azSecret.trim(), subscriptionId: azSub.trim() };
-    } else {
+    } else if (tab === 'gcp') {
       try {
         credentials = JSON.parse(gcpJson);
       } catch {
@@ -65,6 +72,17 @@ export function CloudAccountDialog({
       }
       if (!credentials.project_id || !credentials.client_email || !credentials.private_key)
         return setErr('That JSON is missing project_id / client_email / private_key.');
+    } else {
+      if (!ociTenancy.trim() || !ociUser.trim() || !ociFingerprint.trim() || !ociRegion.trim() || !ociKey.trim())
+        return setErr('Fill in tenancy OCID, user OCID, fingerprint, region and private key.');
+      credentials = {
+        tenancyId: ociTenancy.trim(),
+        userId: ociUser.trim(),
+        fingerprint: ociFingerprint.trim(),
+        region: ociRegion.trim(),
+        privateKey: ociKey,
+        compartmentId: ociCompartment.trim() || undefined,
+      };
     }
 
     setBusy(true);
@@ -115,6 +133,9 @@ export function CloudAccountDialog({
         <button className={tab === 'gcp' ? 'on' : ''} onClick={() => setTab('gcp')} type="button">
           GCP
         </button>
+        <button className={tab === 'oci' ? 'on' : ''} onClick={() => setTab('oci')} type="button">
+          OCI
+        </button>
       </div>
 
       {tab === 'aws' && (
@@ -163,6 +184,40 @@ export function CloudAccountDialog({
               value={gcpJson}
               onChange={(e) => setGcpJson(e.target.value)}
               placeholder='{ "type": "service_account", "project_id": "...", "client_email": "...", "private_key": "..." }'
+              style={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }}
+            />
+          </Field>
+        </>
+      )}
+
+      {tab === 'oci' && (
+        <>
+          <div className="field-row">
+            <Field label="Tenancy OCID">
+              <input className="input" value={ociTenancy} onChange={(e) => setOciTenancy(e.target.value)} placeholder="ocid1.tenancy.oc1..aaaa…" autoComplete="off" />
+            </Field>
+            <Field label="User OCID">
+              <input className="input" value={ociUser} onChange={(e) => setOciUser(e.target.value)} placeholder="ocid1.user.oc1..aaaa…" autoComplete="off" />
+            </Field>
+          </div>
+          <div className="field-row">
+            <Field label="Key fingerprint">
+              <input className="input" value={ociFingerprint} onChange={(e) => setOciFingerprint(e.target.value)} placeholder="12:34:56:…" autoComplete="off" />
+            </Field>
+            <Field label="Region">
+              <input className="input" value={ociRegion} onChange={(e) => setOciRegion(e.target.value)} placeholder="ap-mumbai-1" />
+            </Field>
+          </div>
+          <Field label="Compartment OCID (optional)" hint="Leave blank to scan the tenancy (root compartment).">
+            <input className="input" value={ociCompartment} onChange={(e) => setOciCompartment(e.target.value)} placeholder="ocid1.compartment.oc1..aaaa…" autoComplete="off" />
+          </Field>
+          <Field label="Private key (PEM)" hint="From the API key pair you created under your OCI user.">
+            <textarea
+              className="textarea"
+              rows={6}
+              value={ociKey}
+              onChange={(e) => setOciKey(e.target.value)}
+              placeholder="-----BEGIN PRIVATE KEY-----&#10;…&#10;-----END PRIVATE KEY-----"
               style={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }}
             />
           </Field>

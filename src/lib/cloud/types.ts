@@ -1,4 +1,4 @@
-export type Cloud = 'gcp' | 'aws' | 'azure';
+export type Cloud = 'gcp' | 'aws' | 'azure' | 'oci';
 
 export interface VM {
   cloud: Cloud;

@@ -18,6 +18,9 @@
     "@google-cloud/monitoring": "^4.1.0",
     "@supabase/supabase-js": "^2.45.4",
     "next": "^16.2.6",
+    "oci-common": "^2.132.0",
+    "oci-core": "^2.132.0",
+    "oci-monitoring": "^2.132.0",
     "react": "19.0.0",
     "react-dom": "19.0.0"
   },

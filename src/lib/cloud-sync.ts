@@ -7,6 +7,7 @@ const PROVIDER_LABEL: Record<Cloud, string> = {
   aws: 'AWS EC2',
   azure: 'Azure VM',
   gcp: 'GCP CE',
+  oci: 'OCI Compute',
 };
 
 // Map each provider's raw instance state to our healthy/warning/down model.

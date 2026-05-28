@@ -38,7 +38,7 @@ export async function POST(req: Request) {
     if (!name || !client_id || !provider || !credentials) {
       return bad('name, client_id, provider and credentials are required');
     }
-    if (!['aws', 'azure', 'gcp'].includes(provider)) return bad('provider must be aws | azure | gcp');
+    if (!['aws', 'azure', 'gcp', 'oci'].includes(provider)) return bad('provider must be aws | azure | gcp | oci');
 
     let label = '';
     if (provider === 'aws') {
@@ -50,10 +50,15 @@ export async function POST(req: Request) {
       if (!c.tenantId || !c.clientId || !c.clientSecret || !c.subscriptionId)
         return bad('Azure requires tenantId, clientId, clientSecret, subscriptionId');
       label = String(c.subscriptionId);
-    } else {
+    } else if (provider === 'gcp') {
       const c = credentials;
       if (!c.project_id || !c.client_email || !c.private_key) return bad('GCP key must include project_id, client_email and private_key');
       label = String(c.project_id);
+    } else {
+      const c = credentials;
+      if (!c.tenancyId || !c.userId || !c.fingerprint || !c.region || !c.privateKey)
+        return bad('OCI requires tenancyId, userId, fingerprint, region and privateKey');
+      label = String(c.region) + ' · ' + String(c.fingerprint).slice(0, 11) + '…';
     }
 
     let credentials_encrypted: string;
