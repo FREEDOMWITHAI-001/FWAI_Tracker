@@ -1,4 +1,4 @@
-import { EC2Client, DescribeRegionsCommand, DescribeInstancesCommand } from '@aws-sdk/client-ec2';
+import { EC2Client, DescribeInstancesCommand } from '@aws-sdk/client-ec2';
 import { CloudWatchClient, GetMetricDataCommand } from '@aws-sdk/client-cloudwatch';
 import type { CloudAdapter, VM, MetricSeries, MetricKind } from './types';
 
@@ -7,6 +7,7 @@ interface AWSCreds {
   secretAccessKey: string;
   sessionToken?: string;
   region: string;
+  regions?: string[] | string; // optional: scan these instead of just `region`
 }
 
 function parseCreds(creds: string): AWSCreds {
@@ -25,21 +26,29 @@ const METRIC_MAP: Record<MetricKind, { name: string; namespace: string; unit: st
 export const awsAdapter: CloudAdapter = {
   async listVMs(accountId, credsStr): Promise<VM[]> {
     const creds = parseCreds(credsStr);
-    const baseConfig = {
-      credentials: { accessKeyId: creds.accessKeyId, secretAccessKey: creds.secretAccessKey, ...(creds.sessionToken ? { sessionToken: creds.sessionToken } : {}) },
-      region: creds.region,
+    const baseCreds = {
+      accessKeyId: creds.accessKeyId,
+      secretAccessKey: creds.secretAccessKey,
+      ...(creds.sessionToken ? { sessionToken: creds.sessionToken } : {}),
     };
-    const ec2Bootstrap = new EC2Client(baseConfig);
-    const regionsResp = await ec2Bootstrap.send(new DescribeRegionsCommand({}));
-    const regions = (regionsResp.Regions || []).map(r => r.RegionName).filter(Boolean) as string[];
+    // Scan the configured region only (avoids opening ~30 parallel connections,
+    // which causes "socket hang up" on serverless hosts and is usually slow).
+    // Set creds.regions (array or comma list) to scan more than one.
+    const regions: string[] =
+      creds.regions && (Array.isArray(creds.regions) ? creds.regions.length : String(creds.regions).trim())
+        ? Array.isArray(creds.regions)
+          ? creds.regions
+          : String(creds.regions).split(',').map((s) => s.trim()).filter(Boolean)
+        : [creds.region];
+
     const out: VM[] = [];
-    await Promise.all(regions.map(async region => {
-      const client = new EC2Client({ ...baseConfig, region });
+    for (const region of regions) {
+      const client = new EC2Client({ credentials: baseCreds, region });
       try {
         const resp = await client.send(new DescribeInstancesCommand({}));
         for (const res of resp.Reservations || []) {
           for (const inst of res.Instances || []) {
-            const nameTag = (inst.Tags || []).find(t => t.Key === 'Name')?.Value || '';
+            const nameTag = (inst.Tags || []).find((t) => t.Key === 'Name')?.Value || '';
             const tags: Record<string, string> = {};
             for (const t of inst.Tags || []) if (t.Key && t.Value) tags[t.Key] = t.Value;
             out.push({
@@ -58,10 +67,11 @@ export const awsAdapter: CloudAdapter = {
             });
           }
         }
-      } catch {
-        // region opt-in not enabled, skip
+      } catch (e) {
+        // With a single region, surface the real error; with several, skip the bad one.
+        if (regions.length === 1) throw e;
       }
-    }));
+    }
     return out;
   },
 
