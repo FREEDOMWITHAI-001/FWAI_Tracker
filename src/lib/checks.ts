@@ -17,8 +17,23 @@ export async function checkVm(db: SupabaseClient, vm: CheckTarget) {
     return { skipped: true as const, vm_id: vm.id };
   }
 
+  // "Down only after 2 consecutive misses": a single failed probe is shown as
+  // a warning, not down, so one cold-start/blip doesn't flip the badge. We look
+  // at the most recent prior sample (recorded below) to decide.
+  let displayStatus = r.status;
+  if (r.status === 'down') {
+    const { data: last } = await db
+      .from('vm_metrics')
+      .select('status')
+      .eq('vm_id', vm.id)
+      .order('checked_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!last || last.status !== 'down') displayStatus = 'warning'; // first miss
+  }
+
   const patch: Record<string, unknown> = {
-    status: r.status,
+    status: displayStatus,
     last_checked_at: new Date().toISOString(),
     last_response_ms: r.response_ms,
   };
@@ -28,6 +43,7 @@ export async function checkVm(db: SupabaseClient, vm: CheckTarget) {
 
   const { data: updated } = await db.from('vms').update(patch).eq('id', vm.id).select().single();
 
+  // record the true probe result in history (so misses still show on the graph)
   await db.from('vm_metrics').insert({
     vm_id: vm.id,
     status: r.status,
@@ -54,10 +70,23 @@ export async function checkApp(db: SupabaseClient, app: AppCheckTarget) {
     return { skipped: true as const, app_id: app.id };
   }
 
+  // Down only after 2 consecutive misses (see checkVm for rationale).
+  let displayStatus = r.status;
+  if (r.status === 'down') {
+    const { data: last } = await db
+      .from('app_metrics')
+      .select('status')
+      .eq('app_id', app.id)
+      .order('checked_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!last || last.status !== 'down') displayStatus = 'warning'; // first miss
+  }
+
   await db
     .from('apps')
     .update({
-      status: r.status,
+      status: displayStatus,
       resp_ms: r.response_ms ?? 0,
       health: r.detail,
       last_checked_at: new Date().toISOString(),
@@ -65,6 +94,7 @@ export async function checkApp(db: SupabaseClient, app: AppCheckTarget) {
     })
     .eq('id', app.id);
 
+  // record the true probe result in history
   await db.from('app_metrics').insert({ app_id: app.id, status: r.status, response_ms: r.response_ms });
 
   return { skipped: false as const, app_id: app.id, result: r };

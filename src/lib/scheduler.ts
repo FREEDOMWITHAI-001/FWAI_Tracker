@@ -73,7 +73,7 @@ export function startScheduler() {
   }
   g.__fwaiScheduler = true;
 
-  const checkMs = Number(process.env.CHECK_INTERVAL_MS) || 300_000; // 5 min
+  const checkMs = Number(process.env.CHECK_INTERVAL_MS) || 300_000; // 5 min default
   const cloudMs = Number(process.env.CLOUD_SYNC_INTERVAL_MS) || 300_000; // 5 min
   console.log(`[scheduler] started — checks every ${checkMs / 1000}s, cloud sync every ${cloudMs / 1000}s`);
 

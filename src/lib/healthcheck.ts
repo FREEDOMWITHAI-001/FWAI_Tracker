@@ -11,7 +11,7 @@ export interface ProbeResult {
 }
 
 const WARN_MS = 1500; // reachable but slow -> warning
-const TIMEOUT_MS = 8000;
+const TIMEOUT_MS = 30000; // allow for cold starts before calling it a miss
 
 function clampPct(v: unknown): number | null {
   const n = Number(v);
