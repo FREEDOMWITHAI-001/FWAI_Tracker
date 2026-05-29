@@ -71,6 +71,21 @@ interface SshRun {
 }
 
 function runOverSsh(creds: SshCreds, command: string): Promise<SshRun> {
+  return runOverSshOnce(creds, command).then(async (first) => {
+    if (first.reachable) return first;
+    // One retry on transient failures (timeout, handshake, reset, refused).
+    // SSH from serverless functions to AWS occasionally drops the first
+    // connection — a single retry with a short delay absorbs that without
+    // flipping the row to Down.
+    const transient = /timeout|handshake|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH|EPIPE/i;
+    if (!transient.test(first.detail)) return first;
+    await new Promise((r) => setTimeout(r, 1000));
+    const second = await runOverSshOnce(creds, command);
+    return second.reachable ? second : { ...second, detail: `${first.detail} (retried: ${second.detail})` };
+  });
+}
+
+function runOverSshOnce(creds: SshCreds, command: string): Promise<SshRun> {
   return new Promise((resolve) => {
     const conn = new Client();
     let settled = false;
