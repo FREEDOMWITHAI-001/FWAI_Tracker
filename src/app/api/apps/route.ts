@@ -1,22 +1,33 @@
 import { supabaseAdmin } from '@/lib/supabase';
 import { ok, bad, guard } from '@/lib/api';
-import { checkApp } from '@/lib/checks';
 
-export const runtime = 'nodejs';
-export const maxDuration = 30;
-type Ctx = { params: Promise<{ id: string }> };
+const APP_FIELDS = ['client_id', 'vm_id', 'name', 'type', 'host', 'status', 'resp_ms', 'health', 'uptime', 'check_url', 'check_host', 'check_port', 'alert_name', 'alert_phone', 'tag'] as const;
 
-// POST /api/apps/[id]/check -> probe this application now (URL or host:port)
-export async function POST(_req: Request, { params }: Ctx) {
+// GET /api/apps -> all apps with client name
+export async function GET() {
   return guard(async () => {
-    const { id } = await params;
     const db = supabaseAdmin();
-    const { data: app, error } = await db.from('apps').select('id, check_url, check_host, check_port, vm_id').eq('id', id).single();
-    if (error) return bad(error.message, 404);
-    if (!app.check_url && !(app.check_host && app.check_port)) {
-      return bad('This application has no Check URL or host:port set. Add one to run checks.');
-    }
-    const out = await checkApp(db, app);
-    return ok(out);
+    const { data, error } = await db
+      .from('apps')
+      .select('*, clients(name)')
+      .order('created_at', { ascending: true });
+    if (error) return bad(error.message, 500);
+    const rows = (data ?? []).map((a: any) => ({ ...a, client_name: a.clients?.name ?? '—' }));
+    return ok(rows);
+  });
+}
+
+// POST /api/apps
+export async function POST(req: Request) {
+  return guard(async () => {
+    const body = await req.json();
+    if (!body?.client_id) return bad('client_id is required');
+    if (!body?.name) return bad('name is required');
+    const row: Record<string, unknown> = {};
+    for (const f of APP_FIELDS) if (body[f] !== undefined) row[f] = body[f] === '' && f === 'vm_id' ? null : body[f];
+    const db = supabaseAdmin();
+    const { data, error } = await db.from('apps').insert(row).select().single();
+    if (error) return bad(error.message, 500);
+    return ok(data, 201);
   });
 }
