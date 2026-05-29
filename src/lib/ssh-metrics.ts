@@ -101,7 +101,7 @@ function runOverSshOnce(creds: SshCreds, command: string): Promise<SshRun> {
     };
     const fail = (detail: string) => finish({ reachable: false, output: '', detail });
 
-    const hardTimeout = setTimeout(() => fail('timeout'), 15000);
+    const hardTimeout = setTimeout(() => fail("timeout"), 30000);
 
     conn.on('ready', () => {
       conn.exec(command, (err, stream) => {
@@ -129,7 +129,7 @@ function runOverSshOnce(creds: SshCreds, command: string): Promise<SshRun> {
         username: creds.username,
         privateKey: creds.privateKey,
         passphrase: creds.passphrase || undefined,
-        readyTimeout: 12000,
+        readyTimeout: 25000,
       });
     } catch (e: any) {
       fail(e?.message || 'connect error');
