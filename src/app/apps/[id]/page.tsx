@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/client';
-import { Pill, ResponseHistoryChart, Loading, Empty, StatusSelect } from '@/components/ui';
+import { Pill, ResponseHistoryChart, Loading, Empty, StatusSelect, ClientTag, Tag } from '@/components/ui';
 import { IconChevronLeft, IconRefresh } from '@/lib/icons';
 import { APP_STATUS_LABEL, type App, type AppMetric } from '@/lib/types';
 
@@ -103,8 +103,11 @@ export default function AppDetailPage() {
     );
 
   const down = app.status === 'down';
-  const hasCheck = !!app.check_url || !!(app.check_host && app.check_port);
-  const target = app.check_url || (app.check_host ? `${app.check_host}:${app.check_port}` : 'not set');
+  const hasSshTunnel = !!(app.vm_id && app.check_port);
+  const hasCheck = !!app.check_url || !!(app.check_host && app.check_port) || hasSshTunnel;
+  const target = hasSshTunnel
+    ? `port ${app.check_port} via VM SSH`
+    : app.check_url || (app.check_host ? `${app.check_host}:${app.check_port}` : 'not set');
   const lastChecked = app.last_checked_at ? new Date(app.last_checked_at).toLocaleString() : 'never';
 
   return (
@@ -116,13 +119,15 @@ export default function AppDetailPage() {
       <div className="cd-head">
         <div>
           <h1 style={{ fontSize: 21 }}>{app.name}</h1>
-          <div className="sub">
-            {app.client_name} · {app.type}
+          <div className="sub" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <ClientTag name={app.client_name} />
+            <Tag label={app.tag} />
+            <span>{app.type}</span>
           </div>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center' }}>
           <Pill status={app.status} label={APP_STATUS_LABEL[app.status]} />
-          <button className="btn" onClick={checkNow} disabled={checking || !hasCheck} title={hasCheck ? '' : 'No Check URL or host:port set'}>
+          <button className="btn" onClick={checkNow} disabled={checking || !hasCheck} title={hasCheck ? '' : 'No Check URL, host:port, or VM+port set'}>
             <IconRefresh />
             {checking ? 'Checking…' : 'Check now'}
           </button>
@@ -148,7 +153,7 @@ export default function AppDetailPage() {
           </div>
           {!hasCheck && (
             <div className="hint" style={{ marginTop: 12, color: 'var(--faint)' }}>
-              Set a <b>Check URL</b> (or host + port) on this app (Edit) to track live up/down and response time.
+              Set a <b>Check URL</b>, host + port, or pick a host VM + port on this app (Edit) to track live up/down and response time.
             </div>
           )}
         </div>

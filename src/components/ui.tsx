@@ -207,6 +207,50 @@ export function AlertItem({
 }
 
 /* ---------------- empty / loading ---------------- */
+export function Tag({ label }: { label: string | null | undefined }) {
+  if (!label || !String(label).trim()) return null;
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        background: '#fff4e0',
+        color: '#a35a00',
+        padding: '2px 9px',
+        borderRadius: 999,
+        fontSize: 11.5,
+        fontWeight: 600,
+        letterSpacing: 0.2,
+        lineHeight: 1.5,
+      }}
+      title={`Tag: ${label}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+export function ClientTag({ name }: { name: string | null | undefined }) {
+  if (!name || name === '—') return null;
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        background: '#eef4ff',
+        color: '#2952cc',
+        padding: '2px 9px',
+        borderRadius: 999,
+        fontSize: 11.5,
+        fontWeight: 600,
+        letterSpacing: 0.2,
+        lineHeight: 1.5,
+      }}
+      title={`Client: ${name}`}
+    >
+      {name}
+    </span>
+  );
+}
+
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
 }

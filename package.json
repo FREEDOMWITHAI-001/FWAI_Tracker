@@ -22,12 +22,14 @@
     "oci-core": "^2.132.0",
     "oci-monitoring": "^2.132.0",
     "react": "19.0.0",
-    "react-dom": "19.0.0"
+    "react-dom": "19.0.0",
+    "ssh2": "^1.17.0"
   },
   "devDependencies": {
     "@types/node": "^22.5.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/ssh2": "^1.15.5",
     "typescript": "^5.6.0"
   }
 }

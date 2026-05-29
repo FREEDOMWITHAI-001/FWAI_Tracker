@@ -38,7 +38,13 @@ export function VMDialog({
     health_url: initial?.health_url ?? '',
     alert_name: initial?.alert_name ?? '',
     alert_phone: initial?.alert_phone ?? '',
+    ssh_user: initial?.ssh_user ?? '',
+    ssh_port: initial?.ssh_port ?? 22,
+    ssh_key: '',
+    ssh_pass: '',
+    tag: initial?.tag ?? '',
   });
+  const hasSsh = !!initial?.has_ssh;
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k: string, v: any) => setForm((f) => ({ ...f, [k]: v }));
@@ -64,6 +70,11 @@ export function VMDialog({
         health_url: form.health_url?.trim() || null,
         alert_name: form.alert_name?.trim() || null,
         alert_phone: form.alert_phone?.trim() || null,
+        ssh_user: form.ssh_user?.trim() || null,
+        ssh_port: Number(form.ssh_port) || 22,
+        tag: form.tag?.trim() || null,
+        ...(form.ssh_key?.trim() ? { ssh_key: form.ssh_key } : {}),
+        ...(form.ssh_pass?.trim() ? { ssh_pass: form.ssh_pass } : {}),
       };
       if (editing) await api.patch(`/api/vms/${initial!.id}`, body);
       else await api.post('/api/vms', body);
@@ -108,42 +119,41 @@ export function VMDialog({
           <StatusSelect value={form.provider} onChange={(v) => set('provider', v)} options={PROVIDERS.map((p) => ({ value: p, label: p }))} />
         </Field>
       </div>
-      <div className="field-row">
-        <Field label="Region">
-          <input className="input" value={form.region ?? ''} onChange={(e) => set('region', e.target.value)} placeholder="ap-south-1" />
-        </Field>
-        <Field label="Initial status" hint="Auto-updated on each check.">
-          <StatusSelect value={form.status} onChange={(v) => set('status', v)} options={STATUSES} />
-        </Field>
-      </div>
+      <Field label="Tag (optional)" hint="Free-form label, e.g. production, internal, Apex Motors.">
+        <input className="input" value={form.tag ?? ''} onChange={(e) => set('tag', e.target.value)} placeholder="production" />
+      </Field>
+      <Field label="Host / IP" hint="The server address — used for the SSH connection.">
+        <input className="input" value={form.host ?? ''} onChange={(e) => set('host', e.target.value)} placeholder="13.232.10.5  or  myserver.com" />
+      </Field>
 
-      <div className="field-row">
-        <Field label="Host / IP" hint="The address the app connects to for the port check.">
-          <input className="input" value={form.host ?? ''} onChange={(e) => set('host', e.target.value)} placeholder="13.232.10.5  or  myserver.com" />
-        </Field>
-        <Field label="Port" hint="e.g. 443, 80, 22, 3306. Primary up/down check.">
-          <input
-            className="input"
-            type="number"
-            min={1}
-            max={65535}
-            value={form.port}
-            onChange={(e) => set('port', e.target.value === '' ? '' : Number(e.target.value))}
-            placeholder="443"
+      <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 12, margin: '12px 0' }}>
+        <div style={{ fontSize: 13, fontWeight: 700 }}>Connect via SSH (.pem)</div>
+        <div style={{ fontSize: 11.5, color: 'var(--faint)', marginBottom: 10 }}>
+          Logs into the server to read real <b>CPU, Memory and Disk</b>.
+        </div>
+        <div className="field-row">
+          <Field label="SSH username">
+            <input className="input" value={form.ssh_user ?? ''} onChange={(e) => set('ssh_user', e.target.value)} placeholder="ubuntu / ec2-user / opc" autoComplete="off" />
+          </Field>
+          <Field label="SSH port">
+            <input className="input" type="number" value={form.ssh_port} onChange={(e) => set('ssh_port', Number(e.target.value))} placeholder="22" />
+          </Field>
+        </div>
+        <Field label={hasSsh ? 'Private key (.pem) — saved; paste to replace' : 'Private key (.pem)'} hint="The SSH private key text. Encrypted before storage.">
+          <textarea
+            className="textarea"
+            rows={5}
+            value={form.ssh_key}
+            onChange={(e) => set('ssh_key', e.target.value)}
+            placeholder={hasSsh ? '•••••• (leave blank to keep the saved key)' : '-----BEGIN RSA PRIVATE KEY-----\n…\n-----END RSA PRIVATE KEY-----'}
+            style={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }}
           />
         </Field>
+        <Field label="Key passphrase (optional)">
+          <input className="input" type="password" value={form.ssh_pass} onChange={(e) => set('ssh_pass', e.target.value)} autoComplete="off" placeholder={hasSsh ? '(unchanged)' : ''} />
+        </Field>
       </div>
 
-      <Field
-        label="Health URL (optional)"
-        hint="Used only if no port is set. If it returns JSON like {cpu, mem, disk}, those fill the gauges automatically."
-      >
-        <input className="input" value={form.health_url ?? ''} onChange={(e) => set('health_url', e.target.value)} placeholder="https://my-server.com/health" />
-      </Field>
-
-      <Field label="Uptime label (optional)" hint='Free text, e.g. "42d 6h".'>
-        <input className="input" value={form.uptime_label ?? ''} onChange={(e) => set('uptime_label', e.target.value)} placeholder="42d 6h" />
-      </Field>
       <div className="field-row">
         <Field label="Alert contact name (optional)" hint="Defaults to the client's contact if blank.">
           <input className="input" value={form.alert_name ?? ''} onChange={(e) => set('alert_name', e.target.value)} placeholder="Dev on-call" />
@@ -151,11 +161,6 @@ export function VMDialog({
         <Field label="Alert WhatsApp (optional)" hint="With country code, e.g. +91XXXXXXXXXX.">
           <input className="input" value={form.alert_phone ?? ''} onChange={(e) => set('alert_phone', e.target.value)} placeholder="+919999999999" />
         </Field>
-      </div>
-
-      <div className="hint" style={{ color: 'var(--faint)', fontSize: 11.5, marginTop: 2 }}>
-        CPU, memory and disk aren&apos;t entered here — they fill in automatically from a connected cloud account or a Health
-        URL that reports them, and show as live gauges + history graphs.
       </div>
     </Modal>
   );

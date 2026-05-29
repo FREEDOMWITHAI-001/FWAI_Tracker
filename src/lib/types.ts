@@ -32,8 +32,12 @@ export interface VM {
   cloud_account_id: string | null;
   external_id: string | null;
   source: 'manual' | 'cloud';
+  ssh_user: string | null;
+  ssh_port: number | null;
+  has_ssh?: boolean; // derived; true when an SSH key is stored
   alert_name: string | null;
   alert_phone: string | null;
+  tag: string | null;
   down_since: string | null;
   alerted: boolean;
   created_at: string;
@@ -81,6 +85,7 @@ export interface App {
   last_response_ms: number | null;
   alert_name: string | null;
   alert_phone: string | null;
+  tag: string | null;
   down_since: string | null;
   alerted: boolean;
   created_at: string;

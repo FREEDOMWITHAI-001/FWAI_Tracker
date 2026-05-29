@@ -4,9 +4,10 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/client';
-import { Pill, Gauge, MetricHistoryChart, ResponseHistoryChart, Loading, Empty, StatusSelect } from '@/components/ui';
-import { IconChevronLeft, IconRefresh } from '@/lib/icons';
-import type { VM, VmMetric } from '@/lib/types';
+import { Pill, Gauge, MetricHistoryChart, ResponseHistoryChart, Loading, Empty, StatusSelect, ClientTag, Tag } from '@/components/ui';
+import { IconChevronLeft, IconRefresh, IconPlus } from '@/lib/icons';
+import { AppDialog } from '@/components/dialogs/app-dialog';
+import { APP_STATUS_LABEL, type VM, type VmMetric, type App } from '@/lib/types';
 
 type VMRow = VM & { client_name: string };
 
@@ -27,6 +28,18 @@ export default function VMDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [checking, setChecking] = useState(false);
   const [note, setNote] = useState('');
+  const [apps, setApps] = useState<(App & { client_name: string })[]>([]);
+  const [addApp, setAddApp] = useState(false);
+  const [checkingApp, setCheckingApp] = useState<string | null>(null);
+
+  const loadApps = useCallback(async () => {
+    try {
+      const all = await api.get<(App & { client_name: string })[]>('/api/apps');
+      setApps(all.filter((a) => a.vm_id === id));
+    } catch {
+      /* ignore */
+    }
+  }, [id]);
 
   const loadMetrics = useCallback(
     async (r: string) => {
@@ -38,7 +51,7 @@ export default function VMDetailPage() {
 
   const load = useCallback(async () => {
     try {
-      const [v] = await Promise.all([api.get<VMRow>(`/api/vms/${id}`), loadMetrics(range)]);
+      const [v] = await Promise.all([api.get<VMRow>(`/api/vms/${id}`), loadMetrics(range), loadApps()]);
       setVm(v);
     } catch {
       setNotFound(true);
@@ -46,7 +59,7 @@ export default function VMDetailPage() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, loadMetrics]);
+  }, [id, loadMetrics, loadApps]);
 
   useEffect(() => {
     load();
@@ -109,7 +122,7 @@ export default function VMDetailPage() {
 
   const down = vm.status === 'down';
   const isCloud = vm.source === 'cloud';
-  const mode: 'metrics' | 'response' | 'none' = isCloud || vm.health_url ? 'metrics' : vm.port ? 'response' : 'none';
+  const mode: 'metrics' | 'response' | 'none' = isCloud || vm.health_url || vm.has_ssh ? 'metrics' : vm.port ? 'response' : 'none';
   const lastChecked = vm.last_checked_at ? new Date(vm.last_checked_at).toLocaleString() : 'never';
 
   return (
@@ -133,8 +146,8 @@ export default function VMDetailPage() {
           <button
             className="btn"
             onClick={checkNow}
-            disabled={checking || (!isCloud && !vm.port && !vm.health_url)}
-            title={isCloud || vm.port || vm.health_url ? '' : 'No host:port set'}
+            disabled={checking || (!isCloud && !vm.port && !vm.health_url && !vm.has_ssh)}
+            title={isCloud || vm.port || vm.health_url || vm.has_ssh ? '' : 'No SSH key, port or Health URL set'}
           >
             <IconRefresh />
             {checking ? (isCloud ? 'Syncing…' : 'Checking…') : isCloud ? 'Sync now' : 'Check now'}
@@ -151,7 +164,7 @@ export default function VMDetailPage() {
           <div className="meta-row">
             <span>
               {isCloud ? 'Source:' : 'Check:'}{' '}
-              <b>{isCloud ? `${vm.provider} (cloud account)` : vm.port ? `${vm.host || '?'}:${vm.port}` : vm.health_url ? vm.health_url : 'not set'}</b>
+              <b>{isCloud ? `${vm.provider} (cloud account)` : vm.has_ssh ? `SSH ${vm.ssh_user || ''}@${vm.host || '?'}:${vm.ssh_port || 22}` : vm.port ? `${vm.host || '?'}:${vm.port}` : vm.health_url ? vm.health_url : 'not set'}</b>
             </span>
             <span>
               Response: <b>{down ? '—' : vm.last_response_ms != null ? `${vm.last_response_ms} ms` : 'n/a'}</b>
@@ -218,6 +231,91 @@ export default function VMDetailPage() {
           {mode === 'response' ? <ResponseHistoryChart samples={metrics} /> : <MetricHistoryChart samples={metrics} />}
         </div>
       </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-h">
+          <h3>Applications on this VM</h3>
+          <button className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: 12.5 }} onClick={() => setAddApp(true)}>
+            <IconPlus /> Add application
+          </button>
+        </div>
+        <div className="tbl-wrap">
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Application</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Response</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {apps.length ? (
+                apps.map((a) => (
+                  <tr key={a.id}>
+                    <td className="mono" style={{ fontSize: 12.5 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Link href={`/apps/${a.id}`} style={{ color: 'var(--blue-600)' }}>
+                          {a.name}
+                        </Link>
+                        <Tag label={a.tag} />
+                      </div>
+                    </td>
+                    <td>
+                      <span className="pill neutral">{a.type}</span>
+                    </td>
+                    <td>
+                      <Pill status={a.status} label={APP_STATUS_LABEL[a.status]} />
+                    </td>
+                    <td className="resp">{a.status === 'down' || a.last_response_ms == null ? '—' : `${a.last_response_ms} ms`}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <Link className="btn btn-ghost" href={`/apps/${a.id}`} style={{ padding: '4px 9px', fontSize: 12 }}>
+                        Open
+                      </Link>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ padding: '4px 9px', fontSize: 12 }}
+                        disabled={checkingApp === a.id || (!a.check_url && !(a.check_host && a.check_port))}
+                        onClick={async () => {
+                          setCheckingApp(a.id);
+                          try {
+                            await api.post(`/api/apps/${a.id}/check`, {});
+                            await loadApps();
+                          } catch {
+                            /* ignore */
+                          } finally {
+                            setCheckingApp(null);
+                          }
+                        }}
+                      >
+                        {checkingApp === a.id ? 'Checking…' : 'Check'}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={5} style={{ color: 'var(--faint)', padding: '20px' }}>
+                    No applications on this VM yet. Add one (monitored by URL or host:port).
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {addApp && (
+        <AppDialog
+          clientId={vm.client_id}
+          clientName={vm.client_name}
+          vmId={vm.id}
+          vms={[vm as any]}
+          onClose={() => setAddApp(false)}
+          onSaved={loadApps}
+        />
+      )}
     </div>
   );
 }

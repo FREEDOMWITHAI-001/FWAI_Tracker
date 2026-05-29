@@ -1,15 +1,36 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { probe, probePort, type ProbeResult } from '@/lib/healthcheck';
+import { collectSshMetrics, sshPortCheck } from '@/lib/ssh-metrics';
+import { decrypt } from '@/lib/crypto';
 import type { VM, App } from '@/lib/types';
 
-type CheckTarget = Pick<VM, 'id' | 'host' | 'port' | 'health_url'>;
+type CheckTarget = Pick<VM, 'id' | 'host' | 'port' | 'health_url'> & {
+  ssh_user?: string | null;
+  ssh_port?: number | null;
+  ssh_key_encrypted?: string | null;
+  ssh_pass_encrypted?: string | null;
+};
 
 // Probe one VM, update its current row, and append a metric sample.
-// Primary check is TCP host:port; if no port is set it falls back to the
-// HTTP Health URL (which can additionally report cpu/mem/disk).
+// Order: SSH (CPU/mem/disk) > TCP host:port (reachability) > HTTP Health URL.
 export async function checkVm(db: SupabaseClient, vm: CheckTarget) {
   let r: ProbeResult;
-  if (vm.host && vm.port) {
+  if (vm.ssh_user && vm.host && vm.ssh_key_encrypted) {
+    try {
+      const m = await collectSshMetrics({
+        host: vm.host,
+        port: vm.ssh_port || 22,
+        username: vm.ssh_user,
+        privateKey: decrypt(vm.ssh_key_encrypted),
+        passphrase: vm.ssh_pass_encrypted ? decrypt(vm.ssh_pass_encrypted) : undefined,
+      });
+      const worst = Math.max(m.cpu ?? 0, m.mem ?? 0, m.disk ?? 0);
+      const status = !m.reachable ? 'down' : worst >= 90 ? 'warning' : 'healthy';
+      r = { status, response_ms: null, cpu: m.cpu, mem: m.mem, disk: m.disk, detail: m.detail };
+    } catch (e) {
+      r = { status: 'down', response_ms: null, cpu: null, mem: null, disk: null, detail: e instanceof Error ? e.message : 'ssh error' };
+    }
+  } else if (vm.host && vm.port) {
     r = await probePort(vm.host, vm.port);
   } else if (vm.health_url) {
     r = await probe(vm.health_url);
@@ -56,18 +77,51 @@ export async function checkVm(db: SupabaseClient, vm: CheckTarget) {
   return { skipped: false as const, vm_id: vm.id, result: r, vm: updated };
 }
 
-type AppCheckTarget = Pick<App, 'id' | 'check_url' | 'check_host' | 'check_port'>;
+type AppCheckTarget = Pick<App, 'id' | 'check_url' | 'check_host' | 'check_port'> & {
+  vm_id?: string | null;
+};
 
-// Probe one application by host:port (preferred) or URL, update its row, and
-// append a response-time sample. Apps have no CPU/mem/disk.
+// Probe one application. Preference order:
+//   1) If linked to a VM that has SSH set up and the app has a port → tunnel
+//      through that VM's SSH and check the port on the VM's localhost.
+//      (Lets app ports stay closed to the public internet.)
+//   2) Else external host:port TCP probe.
+//   3) Else HTTP URL probe.
 export async function checkApp(db: SupabaseClient, app: AppCheckTarget) {
-  let r: ProbeResult;
-  if (app.check_host && app.check_port) {
-    r = await probePort(app.check_host, app.check_port);
-  } else if (app.check_url) {
-    r = await probe(app.check_url);
-  } else {
-    return { skipped: true as const, app_id: app.id };
+  let r: ProbeResult | undefined;
+
+  // 1) SSH tunnel via parent VM (preferred — keeps app ports off the public internet).
+  if (app.vm_id && app.check_port) {
+    const { data: host } = await db
+      .from('vms')
+      .select('host,ssh_user,ssh_port,ssh_key_encrypted,ssh_pass_encrypted')
+      .eq('id', app.vm_id)
+      .single();
+    if (host?.host && host.ssh_user && host.ssh_key_encrypted) {
+      try {
+        const pr = await sshPortCheck(
+          {
+            host: host.host,
+            port: host.ssh_port || 22,
+            username: host.ssh_user,
+            privateKey: decrypt(host.ssh_key_encrypted),
+            passphrase: host.ssh_pass_encrypted ? decrypt(host.ssh_pass_encrypted) : undefined,
+          },
+          app.check_port,
+        );
+        const status: ProbeResult['status'] = !pr.reachable ? 'down' : pr.response_ms > 1500 ? 'warning' : 'healthy';
+        r = { status, response_ms: pr.response_ms || null, cpu: null, mem: null, disk: null, detail: pr.detail };
+      } catch (e) {
+        r = { status: 'down', response_ms: null, cpu: null, mem: null, disk: null, detail: e instanceof Error ? e.message : 'ssh error' };
+      }
+    }
+  }
+
+  // 2) External fallbacks (TCP host:port, then HTTP URL).
+  if (!r) {
+    if (app.check_host && app.check_port) r = await probePort(app.check_host, app.check_port);
+    else if (app.check_url) r = await probe(app.check_url);
+    else return { skipped: true as const, app_id: app.id };
   }
 
   // Down only after 2 consecutive misses (see checkVm for rationale).

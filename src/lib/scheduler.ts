@@ -18,13 +18,13 @@ async function runChecks() {
     const db = supabaseAdmin();
     const { data: vms } = await db
       .from('vms')
-      .select('id,host,port,health_url')
-      .or('port.not.is.null,health_url.not.is.null');
+      .select('id,host,port,health_url,ssh_user,ssh_port,ssh_key_encrypted,ssh_pass_encrypted')
+      .or('port.not.is.null,health_url.not.is.null,ssh_key_encrypted.not.is.null');
     await Promise.all((vms ?? []).map((v) => checkVm(db, v as any).catch(() => {})));
 
     const { data: apps } = await db
       .from('apps')
-      .select('id,check_url,check_host,check_port')
+      .select('id,check_url,check_host,check_port,vm_id')
       .or('check_url.not.is.null,check_port.not.is.null');
     await Promise.all((apps ?? []).map((a) => checkApp(db, a as any).catch(() => {})));
 

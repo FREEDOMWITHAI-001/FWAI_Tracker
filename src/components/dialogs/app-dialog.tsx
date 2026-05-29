@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Modal, Field, StatusSelect } from '@/components/ui';
+import { Modal, Field, StatusSelect, ClientTag } from '@/components/ui';
 import { api } from '@/lib/client';
 import type { App, VM, Client } from '@/lib/types';
 
@@ -15,22 +15,26 @@ const STATUSES = [
 export function AppDialog({
   initial,
   clientId,
+  clientName,
   clients,
   vms,
+  vmId,
   onClose,
   onSaved,
 }: {
   initial?: App;
   clientId?: string;
+  clientName?: string;
   clients?: Client[];
   vms?: VM[];
+  vmId?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const editing = !!initial;
   const [form, setForm] = useState({
     client_id: initial?.client_id ?? clientId ?? clients?.[0]?.id ?? '',
-    vm_id: initial?.vm_id ?? '',
+    vm_id: initial?.vm_id ?? vmId ?? '',
     name: initial?.name ?? '',
     type: initial?.type ?? 'Website',
     host: initial?.host ?? '',
@@ -42,6 +46,7 @@ export function AppDialog({
     check_port: initial?.check_port ?? ('' as number | ''),
     alert_name: initial?.alert_name ?? '',
     alert_phone: initial?.alert_phone ?? '',
+    tag: initial?.tag ?? '',
   });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -69,6 +74,7 @@ export function AppDialog({
         check_port: form.check_port === '' || form.check_port == null ? null : Number(form.check_port),
         alert_name: form.alert_name?.trim() || null,
         alert_phone: form.alert_phone?.trim() || null,
+        tag: form.tag?.trim() || null,
       };
       if (editing) await api.patch(`/api/apps/${initial!.id}`, body);
       else await api.post('/api/apps', body);
@@ -96,6 +102,12 @@ export function AppDialog({
       }
     >
       {err && <div className="form-err">{err}</div>}
+      {lockClient && clientName && (
+        <div style={{ background: 'var(--soft, #f5f7fb)', padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ color: 'var(--muted)' }}>For client:</span>
+          <ClientTag name={clientName} />
+        </div>
+      )}
       {!lockClient && clients && (
         <Field label="Client">
           <StatusSelect
@@ -113,47 +125,70 @@ export function AppDialog({
           <StatusSelect value={form.type} onChange={(v) => set('type', v)} options={TYPES.map((t) => ({ value: t, label: t }))} />
         </Field>
       </div>
-
-      <Field label="Check URL" hint="The app is monitored by hitting this URL — up/down + response time.">
-        <input className="input" value={form.check_url ?? ''} onChange={(e) => set('check_url', e.target.value)} placeholder="https://apexmotors.in" />
+      <Field label="Tag (optional)" hint="Free-form label, e.g. production, Apex Motors.">
+        <input className="input" value={form.tag ?? ''} onChange={(e) => set('tag', e.target.value)} placeholder="production" />
       </Field>
-      <div className="field-row">
-        <Field label="…or Host / IP" hint="Use host + port instead of a URL (e.g. an API or DB).">
-          <input className="input" value={form.check_host ?? ''} onChange={(e) => set('check_host', e.target.value)} placeholder="13.232.10.5" />
-        </Field>
-        <Field label="Port">
-          <input
-            className="input"
-            type="number"
-            min={1}
-            max={65535}
-            value={form.check_port}
-            onChange={(e) => set('check_port', e.target.value === '' ? '' : Number(e.target.value))}
-            placeholder="443"
-          />
-        </Field>
-      </div>
 
-      <div className="field-row">
-        <Field label="Initial status" hint="Auto-updated on each check.">
-          <StatusSelect value={form.status} onChange={(v) => set('status', v)} options={STATUSES} />
-        </Field>
-        <Field label="Host VM (optional)" hint="Link to the VM it runs on.">
-          <StatusSelect
-            value={form.vm_id ?? ''}
-            onChange={(v) => set('vm_id', v)}
-            options={[{ value: '', label: '— none —' }, ...clientVms.map((v) => ({ value: v.id, label: v.name }))]}
-          />
-        </Field>
-      </div>
-      <div className="field-row">
-        <Field label="Host label (optional)" hint='Shown on the card, e.g. "ec2 i-0a91", "supabase".'>
-          <input className="input" value={form.host ?? ''} onChange={(e) => set('host', e.target.value)} placeholder="ec2 i-0a91" />
-        </Field>
-        <Field label="Uptime %">
-          <input className="input" type="number" min={0} max={100} step="0.1" value={form.uptime} onChange={(e) => set('uptime', e.target.value)} />
-        </Field>
-      </div>
+      {vmId ? (
+        // Simplified layout when adding from a VM page: just the port. The
+        // parent VM's SSH tunnels the check so the port can stay private.
+        <>
+          <Field label="Port" hint="The port the app listens on inside the VM (checked via the VM's SSH — no public exposure needed).">
+            <input
+              className="input"
+              type="number"
+              min={1}
+              max={65535}
+              value={form.check_port}
+              onChange={(e) => set('check_port', e.target.value === '' ? '' : Number(e.target.value))}
+              placeholder="3000 / 5432 / 8080"
+            />
+          </Field>
+        </>
+      ) : (
+        <>
+          <Field label="Check URL" hint="The app is monitored by hitting this URL — up/down + response time.">
+            <input className="input" value={form.check_url ?? ''} onChange={(e) => set('check_url', e.target.value)} placeholder="https://apexmotors.in" />
+          </Field>
+          <div className="field-row">
+            <Field label="…or Host / IP" hint="Use host + port instead of a URL (e.g. an API or DB).">
+              <input className="input" value={form.check_host ?? ''} onChange={(e) => set('check_host', e.target.value)} placeholder="13.232.10.5" />
+            </Field>
+            <Field label="Port">
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={65535}
+                value={form.check_port}
+                onChange={(e) => set('check_port', e.target.value === '' ? '' : Number(e.target.value))}
+                placeholder="443"
+              />
+            </Field>
+          </div>
+
+          <div className="field-row">
+            <Field label="Initial status" hint="Auto-updated on each check.">
+              <StatusSelect value={form.status} onChange={(v) => set('status', v)} options={STATUSES} />
+            </Field>
+            <Field label="Host VM (optional)" hint="Link to the VM it runs on.">
+              <StatusSelect
+                value={form.vm_id ?? ''}
+                onChange={(v) => set('vm_id', v)}
+                options={[{ value: '', label: '— none —' }, ...clientVms.map((v) => ({ value: v.id, label: v.name }))]}
+              />
+            </Field>
+          </div>
+          <div className="field-row">
+            <Field label="Host label (optional)" hint='Shown on the card, e.g. "ec2 i-0a91", "supabase".'>
+              <input className="input" value={form.host ?? ''} onChange={(e) => set('host', e.target.value)} placeholder="ec2 i-0a91" />
+            </Field>
+            <Field label="Uptime %">
+              <input className="input" type="number" min={0} max={100} step="0.1" value={form.uptime} onChange={(e) => set('uptime', e.target.value)} />
+            </Field>
+          </div>
+        </>
+      )}
 
       <div className="field-row">
         <Field label="Alert contact name (optional)" hint="Defaults to the client's contact if blank.">
@@ -163,9 +198,11 @@ export function AppDialog({
           <input className="input" value={form.alert_phone ?? ''} onChange={(e) => set('alert_phone', e.target.value)} placeholder="+919999999999" />
         </Field>
       </div>
-      <div className="hint" style={{ color: 'var(--faint)', fontSize: 11.5 }}>
-        Response time and status fill in automatically when the app is checked — you don&apos;t enter them by hand.
-      </div>
+      {!vmId && (
+        <div className="hint" style={{ color: 'var(--faint)', fontSize: 11.5 }}>
+          Response time and status fill in automatically when the app is checked — you don&apos;t enter them by hand.
+        </div>
+      )}
     </Modal>
   );
 }

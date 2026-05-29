@@ -1,7 +1,7 @@
 import { supabaseAdmin } from '@/lib/supabase';
 import { ok, bad, guard } from '@/lib/api';
 
-const APP_FIELDS = ['client_id', 'vm_id', 'name', 'type', 'host', 'status', 'resp_ms', 'health', 'uptime', 'check_url', 'check_host', 'check_port', 'alert_name', 'alert_phone'] as const;
+const APP_FIELDS = ['client_id', 'vm_id', 'name', 'type', 'host', 'status', 'resp_ms', 'health', 'uptime', 'check_url', 'check_host', 'check_port', 'alert_name', 'alert_phone', 'tag'] as const;
 
 // GET /api/apps -> all apps with client name
 export async function GET() {
