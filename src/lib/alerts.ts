@@ -58,8 +58,15 @@ export async function runAlerts(db: SupabaseClient) {
         } catch (e) {
           console.error('[alerts] send failed:', e instanceof Error ? e.message : e);
         }
+      } else if (t.status === 'warning') {
+        // 'warning' is ambiguous — it's either a first failed probe (pending
+        // confirmation as down) or a reachable-but-degraded service. Neither is
+        // a clean recovery, so we DON'T reset a running down-timer here: that
+        // lets a flapping outage keep accumulating toward the alert threshold,
+        // and avoids sending a "BACK UP" while the target is still degraded.
+        // (no-op; recovery only happens on a fully healthy check below)
       } else {
-        // healthy / warning  == reachable -> recovery / reset
+        // healthy == reachable and well -> recovery / reset
         if (t.alerted) {
           if (cfg.recovery && phone) {
             try {

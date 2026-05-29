@@ -82,16 +82,22 @@ type AppCheckTarget = Pick<App, 'id' | 'check_url' | 'check_host' | 'check_port'
 };
 
 // Probe one application. Preference order:
-//   1) If linked to a VM that has SSH set up and the app has a port → tunnel
-//      through that VM's SSH and check the port on the VM's localhost.
-//      (Lets app ports stay closed to the public internet.)
-//   2) Else external host:port TCP probe.
-//   3) Else HTTP URL probe.
+//   1) If a Check URL is set → HTTP(S) probe of that URL (checks the site the
+//      way users reach it). An explicit URL always wins, whatever the app type.
+//   2) Else if linked to a VM that has SSH set up and the app has a port →
+//      tunnel through that VM's SSH and check the port on the VM's localhost
+//      (lets app ports stay closed to the public internet).
+//   3) Else external host:port TCP probe.
 export async function checkApp(db: SupabaseClient, app: AppCheckTarget) {
   let r: ProbeResult | undefined;
 
-  // 1) SSH tunnel via parent VM (preferred — keeps app ports off the public internet).
-  if (app.vm_id && app.check_port) {
+  // 1) Explicit Check URL wins — probe the public endpoint over HTTP(S).
+  if (app.check_url) {
+    r = await probe(app.check_url);
+  }
+
+  // 2) SSH tunnel via parent VM (keeps app ports off the public internet).
+  if (!r && app.vm_id && app.check_port) {
     const { data: host } = await db
       .from('vms')
       .select('host,ssh_user,ssh_port,ssh_key_encrypted,ssh_pass_encrypted')
@@ -117,10 +123,9 @@ export async function checkApp(db: SupabaseClient, app: AppCheckTarget) {
     }
   }
 
-  // 2) External fallbacks (TCP host:port, then HTTP URL).
+  // 3) External TCP host:port fallback.
   if (!r) {
     if (app.check_host && app.check_port) r = await probePort(app.check_host, app.check_port);
-    else if (app.check_url) r = await probe(app.check_url);
     else return { skipped: true as const, app_id: app.id };
   }
 
