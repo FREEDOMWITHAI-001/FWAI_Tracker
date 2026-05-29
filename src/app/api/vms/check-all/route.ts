@@ -3,6 +3,7 @@ import { ok, bad, guard } from '@/lib/api';
 import { checkVm } from '@/lib/checks';
 
 export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 // POST /api/vms/check-all -> probe every VM that has a host:port or a health_url,
 // in parallel. Used by the manual "Check now" button, the page auto-poll, and is

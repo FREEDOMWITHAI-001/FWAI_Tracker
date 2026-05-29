@@ -3,6 +3,7 @@ import { ok, bad, guard } from '@/lib/api';
 import { checkVm } from '@/lib/checks';
 
 export const runtime = 'nodejs';
+export const maxDuration = 30;
 type Ctx = { params: Promise<{ id: string }> };
 
 // POST /api/vms/[id]/check -> probe this VM's health_url right now
