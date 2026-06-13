@@ -85,7 +85,7 @@ export default function ClientDetailPage() {
     return (
       <div className="page">
         <Link className="crumb" href="/clients">
-          <IconChevronLeft /> Back to clients
+          <IconChevronLeft /> Back
         </Link>
         <Empty>Client not found.</Empty>
       </div>
@@ -103,7 +103,7 @@ export default function ClientDetailPage() {
   return (
     <div className="page">
       <Link className="crumb" href="/clients">
-        <IconChevronLeft /> Back to clients
+        <IconChevronLeft /> Back
       </Link>
 
       <div className="cd-head">
