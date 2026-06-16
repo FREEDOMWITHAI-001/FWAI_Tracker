@@ -142,6 +142,43 @@ export interface Integration {
   sort_order: number;
 }
 
+export type ZoomKind = 'webinar' | 'meeting';
+
+export interface ZoomAccount {
+  id: string;
+  client_id: string;
+  name: string;
+  account_id: string | null;
+  label: string | null;
+  last_synced_at: string | null;
+  last_sync_error: string | null;
+  created_at: string;
+}
+
+export interface ZoomSession {
+  id: string;
+  zoom_account_id: string;
+  client_id: string;
+  kind: ZoomKind;
+  zoom_id: string;
+  zoom_uuid: string;
+  topic: string;
+  host_email: string | null;
+  start_time: string | null;
+  duration_min: number | null;
+  registrants_count: number;
+  participants_count: number;
+  attendance_pct: number;
+  // Cached engagement metrics (filled in when a session is opened).
+  unique_participants: number | null;
+  peak_concurrent: number | null;
+  avg_duration_min: number | null;
+  rejoins: number | null;
+  metrics_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface UptimeSample {
   id: string;
   client_id: string | null;
