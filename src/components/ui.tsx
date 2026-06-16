@@ -440,6 +440,33 @@ type ResponseSample = { checked_at: string; status: Status; response_ms: number 
 
 // Response-time history for port-checked VMs (no CPU/mem/disk available).
 // Plots response_ms over time; down samples show as red dots on the baseline.
+//
+// A day of 5-min checks is ~288 samples; a week hits the 2000 API cap. Drawing
+// a dot per sample turns that into an unreadable smudge, so we downsample into
+// at most MAX_BUCKETS time buckets (averaging response, flagging any down in
+// the bucket) and only draw per-point dots when the series is sparse.
+const MAX_BUCKETS = 120;
+const DOT_LIMIT = 60; // show individual blue dots only when points <= this
+
+type ChartPoint = { response_ms: number | null; down: boolean; t: string };
+
+function bucketSamples(samples: ResponseSample[]): ChartPoint[] {
+  const isDown = (s: ResponseSample) => s.status === 'down' || s.response_ms == null;
+  const n = samples.length;
+  if (n <= MAX_BUCKETS) {
+    return samples.map((s) => ({ response_ms: s.response_ms, down: isDown(s), t: s.checked_at }));
+  }
+  const size = Math.ceil(n / MAX_BUCKETS);
+  const out: ChartPoint[] = [];
+  for (let i = 0; i < n; i += size) {
+    const slice = samples.slice(i, i + size);
+    const nums = slice.map((s) => s.response_ms).filter((v): v is number => v != null);
+    const avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+    out.push({ response_ms: avg, down: slice.some(isDown), t: slice[slice.length - 1].checked_at });
+  }
+  return out;
+}
+
 export function ResponseHistoryChart({ samples, height = 210 }: { samples: ResponseSample[]; height?: number }) {
   if (samples.length === 0) {
     return (
@@ -448,21 +475,36 @@ export function ResponseHistoryChart({ samples, height = 210 }: { samples: Respo
       </div>
     );
   }
+  const points = bucketSamples(samples);
   const w = 640;
   const padL = 42;
   const padR = 12;
   const top = 14;
   const bot = height - 22;
-  const n = samples.length;
-  const vals = samples.map((s) => s.response_ms ?? 0);
+  const n = points.length;
+  const vals = points.map((p) => p.response_ms ?? 0);
   const niceMax = Math.max(100, Math.ceil(Math.max(...vals) / 100) * 100);
   const x = (i: number) => (n <= 1 ? padL + (w - padL - padR) / 2 : padL + (i * (w - padL - padR)) / (n - 1));
   const y = (v: number) => bot - (Math.min(v, niceMax) / niceMax) * (bot - top);
   const grid = [1, 0.75, 0.5, 0.25, 0].map((f) => Math.round(niceMax * f));
-  const linePts = samples
-    .map((s, i) => (s.response_ms == null ? null : `${x(i).toFixed(1)},${y(s.response_ms).toFixed(1)}`))
+  const linePts = points
+    .map((p, i) => (p.response_ms == null ? null : `${x(i).toFixed(1)},${y(p.response_ms).toFixed(1)}`))
     .filter(Boolean)
     .join(' ');
+
+  // X-axis time labels: a handful of evenly spaced ticks. Show clock time for
+  // spans up to ~2 days, otherwise a short date.
+  const spanMs = new Date(points[n - 1].t).getTime() - new Date(points[0].t).getTime();
+  const fmtTick = (iso: string) => {
+    const d = new Date(iso);
+    return spanMs <= 2 * 86_400_000
+      ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+      : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  };
+  const tickCount = Math.min(5, n);
+  const tickIdx = Array.from({ length: tickCount }, (_, k) =>
+    tickCount <= 1 ? 0 : Math.round((k * (n - 1)) / (tickCount - 1))
+  );
 
   return (
     <>
@@ -475,14 +517,25 @@ export function ResponseHistoryChart({ samples, height = 210 }: { samples: Respo
             </text>
           </g>
         ))}
+        {tickIdx.map((i, k) => (
+          <text
+            key={`t${i}`}
+            x={x(i)}
+            y={height - 6}
+            fontSize={9.5}
+            fill="#94a3b8"
+            fontFamily="IBM Plex Mono"
+            textAnchor={k === 0 ? 'start' : k === tickIdx.length - 1 ? 'end' : 'middle'}
+          >
+            {fmtTick(points[i].t)}
+          </text>
+        ))}
         {linePts && <polyline points={linePts} fill="none" stroke="#2563eb" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />}
-        {samples.map((s, i) =>
-          s.response_ms != null ? (
-            <circle key={i} cx={x(i)} cy={y(s.response_ms)} r={2.6} fill="#2563eb" />
-          ) : (
-            <circle key={i} cx={x(i)} cy={bot} r={3} fill="#dc2626" />
-          )
-        )}
+        {n <= DOT_LIMIT &&
+          points.map((p, i) =>
+            p.response_ms != null ? <circle key={`d${i}`} cx={x(i)} cy={y(p.response_ms)} r={2.6} fill="#2563eb" /> : null
+          )}
+        {points.map((p, i) => (p.down ? <circle key={`x${i}`} cx={x(i)} cy={bot} r={3} fill="#dc2626" /> : null))}
       </svg>
       <div className="chart-legend">
         <span>

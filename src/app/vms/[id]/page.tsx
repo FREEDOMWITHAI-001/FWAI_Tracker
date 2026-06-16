@@ -12,6 +12,9 @@ import { APP_STATUS_LABEL, type VM, type VmMetric, type App } from '@/lib/types'
 type VMRow = VM & { client_name: string };
 
 const RANGES = [
+  { value: '1h', label: 'Last 1 hour' },
+  { value: '4h', label: 'Last 4 hours' },
+  { value: '12h', label: 'Last 12 hours' },
   { value: '1d', label: 'Last 1 day' },
   { value: '3d', label: 'Last 3 days' },
   { value: '1w', label: 'Last 1 week' },

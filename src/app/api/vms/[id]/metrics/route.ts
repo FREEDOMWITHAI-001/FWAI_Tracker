@@ -4,6 +4,9 @@ import { ok, bad, guard } from '@/lib/api';
 type Ctx = { params: Promise<{ id: string }> };
 
 const RANGE_HOURS: Record<string, number> = {
+  '1h': 1,
+  '4h': 4,
+  '12h': 12,
   '1d': 24,
   '3d': 72,
   '1w': 168,
