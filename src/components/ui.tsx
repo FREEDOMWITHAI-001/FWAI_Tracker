@@ -305,12 +305,12 @@ function metricColor(v: number) {
 }
 
 // Circular progress gauge for a single 0-100 metric.
-export function Gauge({ value, label, size = 116 }: { value: number; label: string; size?: number }) {
+export function Gauge({ value, label, size = 116, na = false }: { value: number; label: string; size?: number; na?: boolean }) {
   const v = Math.max(0, Math.min(100, value || 0));
   const stroke = 10;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
-  const dash = (v / 100) * c;
+  const dash = na ? 0 : (v / 100) * c;
   const cx = size / 2;
   const color = metricColor(v);
   return (
@@ -328,12 +328,18 @@ export function Gauge({ value, label, size = 116 }: { value: number; label: stri
           strokeLinecap="round"
           transform={`rotate(-90 ${cx} ${cx})`}
         />
-        <text x={cx} y={cx} textAnchor="middle" dominantBaseline="central" fontSize={size * 0.24} fontWeight={700} fill="var(--ink)">
-          {Math.round(v)}
-          <tspan fontSize={size * 0.12} fill="var(--muted)">
-            %
-          </tspan>
-        </text>
+        {na ? (
+          <text x={cx} y={cx} textAnchor="middle" dominantBaseline="central" fontSize={size * 0.16} fontWeight={600} fill="var(--faint)">
+            n/a
+          </text>
+        ) : (
+          <text x={cx} y={cx} textAnchor="middle" dominantBaseline="central" fontSize={size * 0.24} fontWeight={700} fill="var(--ink)">
+            {Math.round(v)}
+            <tspan fontSize={size * 0.12} fill="var(--muted)">
+              %
+            </tspan>
+          </text>
+        )}
       </svg>
       <div className="gauge-lbl">{label}</div>
     </div>

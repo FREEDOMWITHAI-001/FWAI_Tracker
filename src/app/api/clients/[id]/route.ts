@@ -3,6 +3,13 @@ import { ok, bad, guard } from '@/lib/api';
 
 type Ctx = { params: Promise<{ id: string }> };
 
+// Strip secret SSH blobs before returning a VM to the client; expose has_ssh
+// instead (mirrors /api/vms).
+function sanitizeVm(v: any) {
+  const { ssh_key_encrypted, ssh_pass_encrypted, ...rest } = v;
+  return { ...rest, has_ssh: !!ssh_key_encrypted };
+}
+
 // GET /api/clients/[id] -> client with vms, apps, alerts, webinars(+stages)
 export async function GET(_req: Request, { params }: Ctx) {
   return guard(async () => {
@@ -16,7 +23,8 @@ export async function GET(_req: Request, { params }: Ctx) {
       .eq('id', id)
       .single();
     if (error) return bad(error.message, error.code === 'PGRST116' ? 404 : 500);
-    return ok(data);
+    const sanitized = { ...data, vms: Array.isArray(data.vms) ? data.vms.map(sanitizeVm) : data.vms };
+    return ok(sanitized);
   });
 }
 

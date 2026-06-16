@@ -55,22 +55,39 @@ export async function syncCloudAccount(db: SupabaseClient, acct: CloudAccountRow
 
   let imported = 0;
   for (const vm of instances) {
+    // Has this instance already been imported, and does it have SSH set up?
+    // When SSH is configured we let the SSH health check own the *live* signal
+    // (status + cpu/mem/disk + history); cloud sync then only refreshes
+    // provider-side metadata (name/region/host + the raw instance state in
+    // uptime_label, i.e. the "why it's down"). This way the two never clobber
+    // each other. Cloud-only VMs (no SSH) keep their existing behaviour —
+    // cloud owns status + cpu exactly as before.
+    const { data: existing } = await db
+      .from('vms')
+      .select('id, ssh_key_encrypted')
+      .eq('cloud_account_id', acct.id)
+      .eq('external_id', vm.id)
+      .maybeSingle();
+    const hasSsh = !!existing?.ssh_key_encrypted;
+
     let cpu = 0;
-    try {
-      const series = await adapter.getMetrics(
-        acct.id,
-        creds,
-        vm.id,
-        { name: vm.name, region: vm.region, zone: vm.zone },
-        'cpu_util',
-        start,
-        end
-      );
-      const last = series.points.at(-1);
-      // adapters return cpu_util as a 0..1 fraction
-      if (last) cpu = Math.round(Math.max(0, Math.min(1, last.v)) * 100);
-    } catch {
-      /* metrics are best-effort — leave cpu at 0 if unavailable */
+    if (!hasSsh) {
+      try {
+        const series = await adapter.getMetrics(
+          acct.id,
+          creds,
+          vm.id,
+          { name: vm.name, region: vm.region, zone: vm.zone },
+          'cpu_util',
+          start,
+          end
+        );
+        const last = series.points.at(-1);
+        // adapters return cpu_util as a 0..1 fraction
+        if (last) cpu = Math.round(Math.max(0, Math.min(1, last.v)) * 100);
+      } catch {
+        /* metrics are best-effort — leave cpu at 0 if unavailable */
+      }
     }
 
     const status = mapStatus(cloud, vm.status);
@@ -82,14 +99,17 @@ export async function syncCloudAccount(db: SupabaseClient, acct: CloudAccountRow
       name: vm.name || vm.id,
       provider: PROVIDER_LABEL[cloud],
       region: vm.region,
-      status,
-      cpu,
-      uptime_label: vm.status,
+      uptime_label: vm.status, // raw provider state — kept fresh even on SSH VMs
     };
     // Auto-fill the host with the instance's public IP so it can also be
-    // port-checked for response time. (Port is left untouched — set it once
-    // in the VM editor.) Only set when the provider reports a public IP.
+    // port-checked or SSH'd. (Port is left untouched — set it once in the VM
+    // editor.) Only set when the provider reports a public IP.
     if (vm.publicIp) upsertRow.host = vm.publicIp;
+    // Only take ownership of the live status + cpu when SSH isn't doing it.
+    if (!hasSsh) {
+      upsertRow.status = status;
+      upsertRow.cpu = cpu;
+    }
 
     const { data: row } = await db
       .from('vms')
@@ -97,8 +117,10 @@ export async function syncCloudAccount(db: SupabaseClient, acct: CloudAccountRow
       .select('id')
       .single();
 
-    // append a history point so the CPU graph builds up over repeated syncs
-    if (row?.id) {
+    // Append a history point so the CPU graph builds up over repeated syncs.
+    // Skip it for SSH-backed VMs — the SSH check already records its own,
+    // richer history (cpu/mem/disk), and a cloud sample would dilute it.
+    if (row?.id && !hasSsh) {
       await db.from('vm_metrics').insert({ vm_id: row.id, status, response_ms: null, cpu, mem: null, disk: null });
     }
     imported++;

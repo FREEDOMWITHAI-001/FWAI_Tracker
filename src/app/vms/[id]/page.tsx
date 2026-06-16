@@ -123,6 +123,10 @@ export default function VMDetailPage() {
   const down = vm.status === 'down';
   const isCloud = vm.source === 'cloud';
   const mode: 'metrics' | 'response' | 'none' = isCloud || vm.health_url || vm.has_ssh ? 'metrics' : vm.port ? 'response' : 'none';
+  // Memory/Disk are only real when read from inside the box (SSH) or reported
+  // by a Health-URL agent. A cloud-only VM gives CPU from the provider but no
+  // mem/disk — show those as "n/a" rather than a misleading 0%.
+  const realMemDisk = vm.has_ssh || !!vm.health_url;
   const lastChecked = vm.last_checked_at ? new Date(vm.last_checked_at).toLocaleString() : 'never';
 
   return (
@@ -173,8 +177,8 @@ export default function VMDetailPage() {
           {mode === 'metrics' ? (
             <div className="gauge-row" style={{ marginTop: 14 }}>
               <Gauge value={vm.cpu} label="CPU" />
-              <Gauge value={vm.mem} label="Memory" />
-              <Gauge value={vm.disk} label="Disk" />
+              <Gauge value={vm.mem} label="Memory" na={!realMemDisk} />
+              <Gauge value={vm.disk} label="Disk" na={!realMemDisk} />
             </div>
           ) : mode === 'response' ? (
             <div className="gauge-row" style={{ marginTop: 14 }}>

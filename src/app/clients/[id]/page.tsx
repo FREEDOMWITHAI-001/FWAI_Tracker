@@ -225,6 +225,9 @@ export default function ClientDetailPage() {
             <tbody>
               {vms.length ? (
                 vms.map((v) => {
+                  // mem/disk are only real from SSH or a Health-URL agent; a
+                  // cloud-only VM has provider CPU but no mem/disk — show "—".
+                  const realMemDisk = v.has_ssh || !!v.health_url;
                   return (
                     <tr key={v.id}>
                       <td className="mono" style={{ fontSize: 12.5 }}>
@@ -243,10 +246,10 @@ export default function ClientDetailPage() {
                         <BarGauge value={v.cpu} down={v.status === 'down'} width={56} />
                       </td>
                       <td>
-                        <BarGauge value={v.mem} down={v.status === 'down'} width={56} />
+                        {realMemDisk ? <BarGauge value={v.mem} down={v.status === 'down'} width={56} /> : <span style={{ color: 'var(--faint)' }}>—</span>}
                       </td>
                       <td>
-                        <BarGauge value={v.disk} down={v.status === 'down'} width={56} />
+                        {realMemDisk ? <BarGauge value={v.disk} down={v.status === 'down'} width={56} /> : <span style={{ color: 'var(--faint)' }}>—</span>}
                       </td>
                       <td className="sub mono">{v.uptime_label || '—'}</td>
                       <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
