@@ -119,6 +119,7 @@ export interface SessionMetrics {
   join_events: number; // every join record (a rejoin is a new record)
   unique: number; // distinct people (by email, else name)
   rejoins: number; // join_events − unique
+  rejoined_people: number; // distinct people who joined more than once
   peak_concurrent: number; // most people in the room at once
   peak_time: string | null; // when that peak happened
   total_duration_min: number; // summed watch time across all join records
@@ -132,7 +133,10 @@ export interface SessionMetrics {
 // join+duration when leave_time is missing).
 export function summarizeParticipants(parts: ZoomParticipant[]): SessionMetrics {
   const keyOf = (p: ZoomParticipant) => (p.email ? p.email.toLowerCase() : p.name) || 'unknown';
-  const unique = new Set(parts.map(keyOf)).size;
+  const joinsByPerson = new Map<string, number>();
+  for (const p of parts) joinsByPerson.set(keyOf(p), (joinsByPerson.get(keyOf(p)) || 0) + 1);
+  const unique = joinsByPerson.size;
+  const rejoined_people = [...joinsByPerson.values()].filter((n) => n > 1).length;
   const join_events = parts.length;
   const total_duration_min = parts.reduce((s, p) => s + (p.duration_min || 0), 0);
 
@@ -169,6 +173,7 @@ export function summarizeParticipants(parts: ZoomParticipant[]): SessionMetrics 
     join_events,
     unique,
     rejoins: Math.max(0, join_events - unique),
+    rejoined_people,
     peak_concurrent: peak,
     peak_time: peakIso,
     total_duration_min,

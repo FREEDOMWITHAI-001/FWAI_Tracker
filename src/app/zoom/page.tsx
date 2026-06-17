@@ -370,6 +370,7 @@ export default function ZoomPage() {
                                     [
                                       ['Unique participants', det.data.metrics.unique.toLocaleString(), 'distinct people'],
                                       ['Total joins', det.data.metrics.join_events.toLocaleString(), `${det.data.metrics.rejoins.toLocaleString()} rejoins`],
+                                      ['Rejoined people', det.data.metrics.rejoined_people.toLocaleString(), `of ${det.data.metrics.unique.toLocaleString()} unique`],
                                       [
                                         'Peak concurrent',
                                         det.data.metrics.peak_concurrent.toLocaleString(),
