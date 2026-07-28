@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '@/lib/supabase';
+import { insertOne, sql } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
 import { encrypt } from '@/lib/crypto';
 
@@ -7,25 +7,18 @@ export const runtime = 'nodejs';
 // GET /api/cloud-accounts -> accounts WITHOUT secrets, plus client name + vm count
 export async function GET() {
   return guard(async () => {
-    const db = supabaseAdmin();
-    const { data, error } = await db
-      .from('cloud_accounts')
-      .select('id, client_id, name, provider, label, last_synced_at, last_sync_error, created_at, clients(name), vms(count)')
-      .order('created_at', { ascending: false });
-    if (error) return bad(error.message, 500);
-    const rows = (data ?? []).map((a: any) => ({
-      id: a.id,
-      client_id: a.client_id,
-      name: a.name,
-      provider: a.provider,
-      label: a.label,
-      last_synced_at: a.last_synced_at,
-      last_sync_error: a.last_sync_error,
-      created_at: a.created_at,
-      client_name: a.clients?.name ?? '—',
-      vm_count: a.vms?.[0]?.count ?? 0,
-    }));
-    return ok(rows);
+    // credentials_encrypted is deliberately not selected — the column never
+    // leaves the server. count(*) arrives as a bigint string, hence Number().
+    const rows = await sql<any>(
+      `select a.id, a.client_id, a.name, a.provider, a.label,
+              a.last_synced_at, a.last_sync_error, a.created_at,
+              coalesce(c.name, '—') as client_name,
+              (select count(*) from vms v where v.cloud_account_id = a.id) as vm_count
+         from cloud_accounts a
+         left join clients c on c.id = a.client_id
+        order by a.created_at desc`
+    );
+    return ok(rows.map((a) => ({ ...a, vm_count: Number(a.vm_count) })));
   });
 }
 
@@ -68,13 +61,18 @@ export async function POST(req: Request) {
       return bad(e instanceof Error ? e.message : 'encryption failed', 500);
     }
 
-    const db = supabaseAdmin();
-    const { data, error } = await db
-      .from('cloud_accounts')
-      .insert({ name, client_id, provider, label, credentials_encrypted })
-      .select('id, name, provider, label, client_id, created_at')
-      .single();
-    if (error) return bad(error.message, 500);
-    return ok(data, 201);
+    const row = await insertOne<any>('cloud_accounts', { name, client_id, provider, label, credentials_encrypted });
+    // Echo back only the non-secret columns the previous .select() returned.
+    return ok(
+      {
+        id: row.id,
+        name: row.name,
+        provider: row.provider,
+        label: row.label,
+        client_id: row.client_id,
+        created_at: row.created_at,
+      },
+      201
+    );
   });
 }

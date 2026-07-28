@@ -1,4 +1,4 @@
-import { supabaseAdmin } from './supabase';
+import { exec, sql } from './db';
 import { checkVm, checkApp } from './checks';
 import { syncCloudAccount } from './cloud-sync';
 import { runAlerts } from './alerts';
@@ -15,21 +15,22 @@ async function runChecks() {
   if (checking) return; // skip if the previous cycle is still running
   checking = true;
   try {
-    const db = supabaseAdmin();
-    const { data: vms } = await db
-      .from('vms')
-      .select('id,host,port,health_url,ssh_user,ssh_port,ssh_key_encrypted,ssh_pass_encrypted')
-      .or('port.not.is.null,health_url.not.is.null,ssh_key_encrypted.not.is.null');
-    await Promise.all((vms ?? []).map((v) => checkVm(db, v as any).catch(() => {})));
+    const vms = await sql(
+      `select id, host, port, health_url, ssh_user, ssh_port, ssh_key_encrypted, ssh_pass_encrypted
+         from vms
+        where port is not null or health_url is not null or ssh_key_encrypted is not null`
+    );
+    await Promise.all(vms.map((v) => checkVm(v as any).catch(() => {})));
 
-    const { data: apps } = await db
-      .from('apps')
-      .select('id,check_url,check_host,check_port,vm_id')
-      .or('check_url.not.is.null,check_port.not.is.null');
-    await Promise.all((apps ?? []).map((a) => checkApp(db, a as any).catch(() => {})));
+    const apps = await sql(
+      `select id, check_url, check_host, check_port, vm_id
+         from apps
+        where check_url is not null or check_port is not null`
+    );
+    await Promise.all(apps.map((a) => checkApp(a as any).catch(() => {})));
 
     // after fresh statuses are written, evaluate alert conditions
-    await runAlerts(db).catch((e) => console.error('[alerts] failed:', e?.message));
+    await runAlerts().catch((e) => console.error('[alerts] failed:', e?.message));
   } catch (e) {
     console.error('[scheduler] checks failed:', e instanceof Error ? e.message : e);
   } finally {
@@ -40,13 +41,10 @@ async function runChecks() {
 // Cloud syncs hit provider APIs, so they run much less often than checks.
 async function runCloudSync() {
   try {
-    const db = supabaseAdmin();
-    const { data: accts } = await db
-      .from('cloud_accounts')
-      .select('id,client_id,provider,credentials_encrypted');
-    for (const a of accts ?? []) {
+    const accts = await sql('select id, client_id, provider, credentials_encrypted from cloud_accounts');
+    for (const a of accts) {
       try {
-        await syncCloudAccount(db, a as any);
+        await syncCloudAccount(a as any);
       } catch {
         /* error is recorded on the account row */
       }
@@ -61,9 +59,8 @@ async function runPrune() {
   try {
     const days = Number(process.env.METRICS_RETENTION_DAYS) || 7;
     const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
-    const db = supabaseAdmin();
-    await db.from('vm_metrics').delete().lt('checked_at', cutoff);
-    await db.from('app_metrics').delete().lt('checked_at', cutoff);
+    await exec('delete from vm_metrics where checked_at < $1', [cutoff]);
+    await exec('delete from app_metrics where checked_at < $1', [cutoff]);
   } catch {
     /* ignore */
   }

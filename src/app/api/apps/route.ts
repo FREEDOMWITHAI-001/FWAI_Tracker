@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '@/lib/supabase';
+import { insertOne, sql } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
 
 const APP_FIELDS = ['client_id', 'vm_id', 'name', 'type', 'host', 'status', 'resp_ms', 'health', 'uptime', 'check_url', 'check_host', 'check_port', 'alert_name', 'alert_phone', 'tag'] as const;
@@ -6,13 +6,12 @@ const APP_FIELDS = ['client_id', 'vm_id', 'name', 'type', 'host', 'status', 'res
 // GET /api/apps -> all apps with client name
 export async function GET() {
   return guard(async () => {
-    const db = supabaseAdmin();
-    const { data, error } = await db
-      .from('apps')
-      .select('*, clients(name)')
-      .order('created_at', { ascending: true });
-    if (error) return bad(error.message, 500);
-    const rows = (data ?? []).map((a: any) => ({ ...a, client_name: a.clients?.name ?? '—' }));
+    const rows = await sql(
+      `select a.*, coalesce(c.name, '—') as client_name
+         from apps a
+         left join clients c on c.id = a.client_id
+        order by a.created_at asc`
+    );
     return ok(rows);
   });
 }
@@ -25,9 +24,7 @@ export async function POST(req: Request) {
     if (!body?.name) return bad('name is required');
     const row: Record<string, unknown> = {};
     for (const f of APP_FIELDS) if (body[f] !== undefined) row[f] = body[f] === '' && f === 'vm_id' ? null : body[f];
-    const db = supabaseAdmin();
-    const { data, error } = await db.from('apps').insert(row).select().single();
-    if (error) return bad(error.message, 500);
+    const data = await insertOne('apps', row);
     return ok(data, 201);
   });
 }

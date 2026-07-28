@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { sql, updateById } from '@/lib/db';
 import { getAisensyConfig, sendAisensy } from '@/lib/aisensy';
 
 // Evaluate every VM/app and send WhatsApp alerts via AI Sensy when something
@@ -17,33 +17,41 @@ type Row = {
   alerted: boolean;
   alert_name: string | null;
   alert_phone: string | null;
-  clients: any;
+  client_name: string | null;
+  client_alert_name: string | null;
+  client_alert_phone: string | null;
 };
 
-export async function runAlerts(db: SupabaseClient) {
-  const cfg = await getAisensyConfig(db);
+// The client columns are joined in flat rather than nested, so there is no
+// array-or-object ambiguity to unpick at the call site.
+const rowsFor = (table: 'vms' | 'apps') => `
+  select t.id, t.name, t.status, t.down_since, t.alerted, t.alert_name, t.alert_phone,
+         c.name       as client_name,
+         c.alert_name as client_alert_name,
+         c.alert_phone as client_alert_phone
+    from ${table} t
+    left join clients c on c.id = t.client_id
+`;
+
+export async function runAlerts() {
+  const cfg = await getAisensyConfig();
   if (!cfg.enabled || !cfg.api_key_enc || !cfg.campaign) return; // not configured
 
   const thresholdMs = (cfg.threshold_min || 15) * 60_000;
   const now = Date.now();
 
-  const sel = 'id,name,status,down_since,alerted,alert_name,alert_phone, clients(name,alert_name,alert_phone)';
-  const [{ data: vms }, { data: apps }] = await Promise.all([
-    db.from('vms').select(sel),
-    db.from('apps').select(sel),
-  ]);
+  const [vms, apps] = await Promise.all([sql<Row>(rowsFor('vms')), sql<Row>(rowsFor('apps'))]);
 
-  const handle = async (table: 'vms' | 'apps', rows: Row[] | null) => {
-    for (const t of rows ?? []) {
-      const client = Array.isArray(t.clients) ? t.clients[0] : t.clients || {};
-      const phone = t.alert_phone || client?.alert_phone || '';
-      const who = t.alert_name || client?.alert_name || undefined;
-      const clientName = client?.name || '';
+  const handle = async (table: 'vms' | 'apps', rows: Row[]) => {
+    for (const t of rows) {
+      const phone = t.alert_phone || t.client_alert_phone || '';
+      const who = t.alert_name || t.client_alert_name || undefined;
+      const clientName = t.client_name || '';
 
       if (t.status === 'down') {
         if (!t.down_since) {
           // first confirmed-down moment — start the clock
-          await db.from(table).update({ down_since: new Date().toISOString() }).eq('id', t.id);
+          await updateById(table, t.id, { down_since: new Date().toISOString() });
           continue;
         }
         if (t.alerted) continue;
@@ -54,7 +62,7 @@ export async function runAlerts(db: SupabaseClient) {
         const minutes = Math.round(downMs / 60_000);
         try {
           await sendAisensy(cfg, { destination: phone, userName: who, templateParams: [t.name, clientName, 'DOWN', String(minutes)] });
-          await db.from(table).update({ alerted: true }).eq('id', t.id);
+          await updateById(table, t.id, { alerted: true });
         } catch (e) {
           console.error('[alerts] send failed:', e instanceof Error ? e.message : e);
         }
@@ -75,14 +83,14 @@ export async function runAlerts(db: SupabaseClient) {
               console.error('[alerts] recovery send failed:', e instanceof Error ? e.message : e);
             }
           }
-          await db.from(table).update({ down_since: null, alerted: false }).eq('id', t.id);
+          await updateById(table, t.id, { down_since: null, alerted: false });
         } else if (t.down_since) {
-          await db.from(table).update({ down_since: null }).eq('id', t.id);
+          await updateById(table, t.id, { down_since: null });
         }
       }
     }
   };
 
-  await handle('vms', vms as Row[]);
-  await handle('apps', apps as Row[]);
+  await handle('vms', vms);
+  await handle('apps', apps);
 }

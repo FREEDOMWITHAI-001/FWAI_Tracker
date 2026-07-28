@@ -1,5 +1,4 @@
-import { supabaseAdmin } from '@/lib/supabase';
-import { ok, bad, guard } from '@/lib/api';
+import { ok, guard } from '@/lib/api';
 import { getAisensyConfig, saveAisensyConfig } from '@/lib/aisensy';
 
 export const runtime = 'nodejs';
@@ -7,8 +6,7 @@ export const runtime = 'nodejs';
 // GET /api/settings/aisensy -> config WITHOUT the API key (just whether it's set)
 export async function GET() {
   return guard(async () => {
-    const db = supabaseAdmin();
-    const cfg = await getAisensyConfig(db);
+    const cfg = await getAisensyConfig();
     const { api_key_enc, ...rest } = cfg;
     return ok({ ...rest, has_key: !!api_key_enc });
   });
@@ -18,8 +16,7 @@ export async function GET() {
 export async function PUT(req: Request) {
   return guard(async () => {
     const body = await req.json();
-    const db = supabaseAdmin();
-    const saved = await saveAisensyConfig(db, {
+    const saved = await saveAisensyConfig({
       enabled: !!body.enabled,
       api_url: body.api_url,
       campaign: body.campaign,

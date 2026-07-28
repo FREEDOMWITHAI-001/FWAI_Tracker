@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '@/lib/supabase';
+import { maybeOne, updateById } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
 import { decrypt } from '@/lib/crypto';
 import { fetchSessionParticipants, summarizeParticipants, type ZoomCreds } from '@/lib/zoom';
@@ -13,15 +13,24 @@ type Ctx = { params: Promise<{ id: string }> };
 export async function GET(_req: Request, { params }: Ctx) {
   return guard(async () => {
     const { id } = await params;
-    const db = supabaseAdmin();
-    const { data: s, error } = await db
-      .from('zoom_sessions')
-      .select('id, kind, zoom_id, zoom_uuid, participants_count, zoom_accounts(credentials_encrypted)')
-      .eq('id', id)
-      .single();
-    if (error) return bad(error.message, 404);
+    const s = await maybeOne<{
+      id: string;
+      kind: 'webinar' | 'meeting';
+      zoom_id: string | null;
+      zoom_uuid: string | null;
+      participants_count: number | null;
+      credentials_encrypted: string | null;
+    }>(
+      `select s.id, s.kind, s.zoom_id, s.zoom_uuid, s.participants_count,
+              a.credentials_encrypted
+         from zoom_sessions s
+         left join zoom_accounts a on a.id = s.zoom_account_id
+        where s.id = $1`,
+      [id]
+    );
+    if (!s) return bad('Zoom session not found', 404);
 
-    const enc = (s as any).zoom_accounts?.credentials_encrypted;
+    const enc = s.credentials_encrypted;
     if (!enc) return bad('Zoom account not found for this session', 404);
 
     let creds: ZoomCreds;
@@ -32,24 +41,21 @@ export async function GET(_req: Request, { params }: Ctx) {
     }
 
     try {
-      const participants = await fetchSessionParticipants(creds, (s as any).kind, (s as any).zoom_id, (s as any).zoom_uuid);
-      const storedTotal = Number((s as any).participants_count) || 0;
+      const participants = await fetchSessionParticipants(creds, s.kind, s.zoom_id ?? '', s.zoom_uuid ?? '');
+      const storedTotal = Number(s.participants_count) || 0;
       const metrics = summarizeParticipants(participants);
 
       // Cache the computed metrics on the row so the list/export can show them.
-      await db
-        .from('zoom_sessions')
-        .update({
-          unique_participants: metrics.unique,
-          peak_concurrent: metrics.peak_concurrent,
-          avg_duration_min: metrics.avg_duration_min,
-          rejoins: metrics.rejoins,
-          metrics_at: new Date().toISOString(),
-        })
-        .eq('id', id);
+      await updateById('zoom_sessions', id, {
+        unique_participants: metrics.unique,
+        peak_concurrent: metrics.peak_concurrent,
+        avg_duration_min: metrics.avg_duration_min,
+        rejoins: metrics.rejoins,
+        metrics_at: new Date().toISOString(),
+      });
 
       return ok({
-        kind: (s as any).kind,
+        kind: s.kind,
         stored_total: storedTotal,
         fetched: participants.length,
         truncated: storedTotal > 0 && participants.length < storedTotal,

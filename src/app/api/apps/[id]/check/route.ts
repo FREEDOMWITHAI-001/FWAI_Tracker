@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '@/lib/supabase';
+import { maybeOne } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
 import { checkApp } from '@/lib/checks';
 
@@ -10,13 +10,18 @@ type Ctx = { params: Promise<{ id: string }> };
 export async function POST(_req: Request, { params }: Ctx) {
   return guard(async () => {
     const { id } = await params;
-    const db = supabaseAdmin();
-    const { data: app, error } = await db.from('apps').select('id, check_url, check_host, check_port, vm_id').eq('id', id).single();
-    if (error) return bad(error.message, 404);
+    const app = await maybeOne<{
+      id: string;
+      check_url: string | null;
+      check_host: string | null;
+      check_port: number | null;
+      vm_id: string | null;
+    }>('select id, check_url, check_host, check_port, vm_id from apps where id = $1', [id]);
+    if (!app) return bad('App not found', 404);
     if (!app.check_url && !(app.check_host && app.check_port) && !(app.vm_id && app.check_port)) {
       return bad('This application needs a Check URL, host + port, or a host VM + port. Add one to run checks.');
     }
-    const out = await checkApp(db, app);
+    const out = await checkApp(app);
     return ok(out);
   });
 }

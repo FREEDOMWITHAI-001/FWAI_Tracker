@@ -1,10 +1,10 @@
 # FWAI Tracker
 
 VM & application monitoring for an agency/ops team — organized **client-wise and VM-wise**.
-Built with **Next.js 15 (App Router) + React 19 + TypeScript**, backed by **Supabase**.
+Built with **Next.js 15 (App Router) + React 19 + TypeScript**, backed by **PostgreSQL**.
 
 This is the working app behind the `monitoring-dashboard.html` mockup: the exact same
-design, but every page reads/writes real data from Supabase, with in-app **add/edit/delete**
+design, but every page reads/writes real data from Postgres, with in-app **add/edit/delete**
 forms for clients, VMs, applications, alerts and webinars.
 
 ---
@@ -24,47 +24,59 @@ forms for clients, VMs, applications, alerts and webinars.
 
 ---
 
-## Setup (two required steps)
+## Setup
 
-### 1. Create the database
-
-In your Supabase project open **SQL Editor → New query**, paste the contents of
-[`supabase/migration.sql`](supabase/migration.sql), and **Run**. That creates every table
-(`clients`, `vms`, `apps`, `alerts`, `webinars`, `webinar_stages`, `integrations`,
-`app_settings`, `uptime_samples`) and seeds the four default integration rows.
-
-Then run [`supabase/migration_02_healthchecks.sql`](supabase/migration_02_healthchecks.sql)
-the same way — it adds the VM health-check columns and the `vm_metrics` history table.
-(It's idempotent and only adds things, so it won't touch existing data.)
-
-Finally run [`supabase/migration_03_cloud.sql`](supabase/migration_03_cloud.sql) — it adds the
-`cloud_accounts` table and the columns that link imported VMs back to their cloud account.
-
-And run [`supabase/migration_04_portchecks.sql`](supabase/migration_04_portchecks.sql) — it adds
-the `host` and `port` columns used for TCP port checks.
-
-And run [`supabase/migration_05_app_checks.sql`](supabase/migration_05_app_checks.sql) — it adds
-application check columns (`check_url`, `check_host`, `check_port`) and the `app_metrics` table.
-
-### 2. Add your Supabase keys
+### 1. Point at a Postgres database
 
 ```bash
 cp .env.example .env.local
 ```
 
-Then fill in `.env.local` (find both under **Supabase → Project Settings → API**):
+`DATABASE_URL` is the only database setting — swapping between local Docker, a managed
+host and a self-hosted VM is a one-line change with no code edits.
 
-```
-NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+**Local development** — bring up Postgres 17 in Docker:
+
+```bash
+docker compose up -d
 ```
 
-If you'll use **Cloud accounts** (AWS/Azure/GCP), also set a master key used to encrypt those
-credentials at rest — any long random string (e.g. `openssl rand -base64 48`):
+That serves the database on host port **5433** (not 5432, so it can't clash with a local
+Postgres install) and matches the `DATABASE_URL` already in `.env.example`.
+
+**Hosted / production** — set `DATABASE_URL` to your own instance. TLS is enabled
+automatically for any non-local host; append `?sslmode=disable` to force it off. On Vercel,
+point it at a **pooled** endpoint (PgBouncer, or a Neon/Supabase pooler): every serverless
+invocation opens its own connection, so an unpooled database will exhaust `max_connections`.
+
+If you'll use **Cloud accounts** (AWS/Azure/GCP/OCI), Zoom or AI Sensy, also set the master
+key used to encrypt those credentials at rest — any long random string
+(e.g. `openssl rand -base64 48`):
 
 ```
 APP_ENCRYPTION_KEY=your-long-random-string
 ```
+
+> Changing `APP_ENCRYPTION_KEY` later makes every already-stored credential undecryptable.
+
+### 2. Create the schema
+
+```bash
+npm run migrate
+```
+
+This applies everything in [`migrations/`](migrations/) in numeric order, exactly once each,
+recording what ran in a `schema_migrations` table. Each file runs in its own transaction, so a
+failure rolls back cleanly and leaves the database untouched. Re-running is safe — pending
+migrations only.
+
+```bash
+npm run migrate -- --list   # show applied vs pending
+npm run migrate -- --dry    # show what would run, change nothing
+```
+
+Adding a schema change means dropping a new `migration_NN_name.sql` into `migrations/` and
+re-running the command. There is no SQL to paste into a console by hand.
 
 ### 3. Run it
 
@@ -97,7 +109,7 @@ VMs it imported.
 
 **Credential handling:**
 - Credentials are encrypted with **AES-256-GCM** (key derived from `APP_ENCRYPTION_KEY`) before
-  being stored — only the ciphertext goes into Supabase, and it's useless without that key.
+  being stored — only the ciphertext goes into the database, and it's useless without that key.
 - The list endpoint never returns secrets; decryption happens only server-side during a sync.
 - Use **read-only** credentials (e.g. an AWS IAM user limited to `ec2:Describe*` +
   `cloudwatch:GetMetricData`, an Azure Reader role, a GCP viewer service account).
@@ -153,17 +165,24 @@ bottom of `migration_02_healthchecks.sql`).
 
 ---
 
-## How it talks to Supabase (security model)
+## How it talks to Postgres (security model)
 
-- Supabase is accessed **only from the server** — inside Next.js route handlers under
-  `src/app/api/*` — using the **service-role key** (`src/lib/supabase.ts`).
-- The service-role key lives in `SUPABASE_SERVICE_ROLE_KEY`, which is **not** a
-  `NEXT_PUBLIC_` variable, so it is never shipped to the browser.
-- Client components fetch from those `/api/*` routes (`src/lib/client.ts`); they never hold a
-  Supabase key.
-- Because the service role bypasses Row Level Security, **RLS is left disabled** in the
-  migration. If you later expose the anon key to the browser or add user auth, enable RLS and
-  add policies (there are commented examples at the bottom of `migration.sql`).
+- The database is reached **only from the server** — inside Next.js route handlers under
+  `src/app/api/*` — through the pooled client in `src/lib/db.ts`.
+- `DATABASE_URL` is **not** a `NEXT_PUBLIC_` variable, so the connection string (and the
+  credentials in it) is never shipped to the browser.
+- Client components fetch from those `/api/*` routes (`src/lib/client.ts`); they hold no
+  database credentials at all.
+- **Every query is parameterised.** Values are always bound as `$1, $2, …` — never
+  interpolated into SQL text. The few places that must name a table or column dynamically
+  (the generic insert/update/delete helpers) validate the identifier against a strict
+  allowlist pattern first.
+- Endpoints that return rows containing secrets select columns explicitly and strip the
+  ciphertext (`ssh_key_encrypted`, `credentials_encrypted`) before responding, exposing only
+  a boolean like `has_ssh`.
+- The app connects as a single trusted role, so **RLS is left disabled** in the migrations. If
+  you later add user auth, enable RLS and add policies (there are commented examples at the
+  bottom of `migrations/migration.sql`).
 
 > Keep this app behind your own auth / network (it assumes a trusted internal Ops team).
 
@@ -171,10 +190,14 @@ bottom of `migration_02_healthchecks.sql`).
 
 ## The uptime charts
 
-The 14-day charts read from the optional `uptime_samples` table (fleet-wide rows have
-`client_id IS NULL`; per-client rows set `client_id`). It starts empty, so the charts show an
-empty state until you insert samples — e.g. a daily cron that writes one row per day. Everything
-else works fully without it.
+`GET /api/uptime` derives the 14-day series from the real check history — `vm_metrics` and
+`app_metrics` — so the charts fill in on their own as checks run; nothing needs seeding.
+A day's uptime is `checks that were reachable (status <> 'down') / total checks that day`,
+bucketed in UTC. Pass `?client_id=` to scope it to one client's VMs and apps, or `?days=` to
+change the window (default 14).
+
+The bucketing and counting happen in SQL, so the endpoint stays flat as history grows rather
+than reading every sample into memory.
 
 ---
 
@@ -182,8 +205,12 @@ else works fully without it.
 
 ```
 fwai-tracker/
-├─ supabase/
-│  └─ migration.sql            # run this in Supabase first
+├─ docker-compose.yml          # local Postgres 17 (host port 5433)
+├─ migrations/                 # numbered .sql, applied by `npm run migrate`
+│  └─ migration.sql            # base schema
+├─ scripts/
+│  ├─ migrate.mjs              # migration runner (tracks schema_migrations)
+│  └─ import-from-supabase.mjs # one-off data copy off Supabase
 ├─ src/
 │  ├─ app/
 │  │  ├─ layout.tsx            # fonts + <Shell>
@@ -191,13 +218,13 @@ fwai-tracker/
 │  │  ├─ page.tsx              # Dashboard
 │  │  ├─ clients/              # list + [id] detail
 │  │  ├─ vms/ zoom/ alerts/ reports/ settings/
-│  │  └─ api/                  # CRUD route handlers (server-side Supabase)
+│  │  └─ api/                  # CRUD route handlers (server-side SQL)
 │  ├─ components/
 │  │  ├─ shell.tsx             # sidebar + header + mobile nav
 │  │  ├─ ui.tsx                # Pill, StatCard, LineChart, Donut, Modal, Field…
 │  │  └─ dialogs/              # add/edit forms per entity
 │  └─ lib/
-│     ├─ supabase.ts           # server-only service-role client
+│     ├─ db.ts                 # server-only pg pool + query helpers
 │     ├─ types.ts              # shared types + helpers
 │     ├─ api.ts                # route response helpers
 │     ├─ client.ts             # browser fetch helpers
@@ -212,5 +239,3 @@ fwai-tracker/
 - Built on port **3002** (`npm run dev` / `npm run start`).
 - A client's **overall status** is derived from its apps (down > warning > healthy) — not stored.
 - Dashboard stats, uptime-by-client and the reliability summary are all computed from live data.
-#   F W A I _ T r a c k e r  
- 

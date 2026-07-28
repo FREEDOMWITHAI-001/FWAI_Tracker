@@ -1,5 +1,5 @@
-import { supabaseAdmin } from '@/lib/supabase';
-import { ok, bad, guard } from '@/lib/api';
+import { sql } from '@/lib/db';
+import { ok, guard } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -12,19 +12,30 @@ export async function GET(req: Request) {
     const accountId = url.searchParams.get('account_id');
     const kind = url.searchParams.get('kind');
 
-    const db = supabaseAdmin();
-    let q = db
-      .from('zoom_sessions')
-      .select('*, clients(name)')
-      .order('start_time', { ascending: false, nullsFirst: false })
-      .limit(500);
-    if (clientId) q = q.eq('client_id', clientId);
-    if (accountId) q = q.eq('zoom_account_id', accountId);
-    if (kind) q = q.eq('kind', kind);
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (clientId) {
+      params.push(clientId);
+      where.push(`s.client_id = $${params.length}`);
+    }
+    if (accountId) {
+      params.push(accountId);
+      where.push(`s.zoom_account_id = $${params.length}`);
+    }
+    if (kind) {
+      params.push(kind);
+      where.push(`s.kind = $${params.length}`);
+    }
 
-    const { data, error } = await q;
-    if (error) return bad(error.message, 500);
-    const rows = (data ?? []).map((s: any) => ({ ...s, client_name: s.clients?.name ?? '—' }));
+    const rows = await sql(
+      `select s.*, coalesce(c.name, '—') as client_name
+         from zoom_sessions s
+         left join clients c on c.id = s.client_id
+         ${where.length ? `where ${where.join(' and ')}` : ''}
+        order by s.start_time desc nulls last
+        limit 500`,
+      params
+    );
     return ok(rows);
   });
 }

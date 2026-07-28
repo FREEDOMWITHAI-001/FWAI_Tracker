@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '@/lib/supabase';
+import { insertMany, insertOne, sql } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
 
 interface StageInput {
@@ -11,17 +11,17 @@ interface StageInput {
 // GET /api/webinars -> webinars with stages + client name, newest first
 export async function GET() {
   return guard(async () => {
-    const db = supabaseAdmin();
-    const { data, error } = await db
-      .from('webinars')
-      .select('*, clients(name), webinar_stages(*)')
-      .order('webinar_date', { ascending: false, nullsFirst: false });
-    if (error) return bad(error.message, 500);
-    const rows = (data ?? []).map((w: any) => ({
-      ...w,
-      client_name: w.clients?.name ?? '—',
-      webinar_stages: (w.webinar_stages ?? []).sort((a: any, b: any) => a.sort_order - b.sort_order),
-    }));
+    // Stages are ordered inside the aggregate, so no re-sort is needed in JS.
+    const rows = await sql(
+      `select w.*,
+              coalesce(c.name, '—') as client_name,
+              coalesce((select json_agg(s order by s.sort_order)
+                          from webinar_stages s
+                         where s.webinar_id = w.id), '[]'::json) as webinar_stages
+         from webinars w
+         left join clients c on c.id = w.client_id
+        order by w.webinar_date desc nulls last`
+    );
     return ok(rows);
   });
 }
@@ -32,22 +32,16 @@ export async function POST(req: Request) {
     const body = await req.json();
     if (!body?.client_id) return bad('client_id is required');
     if (!body?.name) return bad('name is required');
-    const db = supabaseAdmin();
 
-    const { data: webinar, error } = await db
-      .from('webinars')
-      .insert({
-        client_id: body.client_id,
-        name: body.name,
-        participants: body.participants ?? 0,
-        reminders: body.reminders ?? 0,
-        attendance: body.attendance ?? 0,
-        webinar_date: body.webinar_date || null,
-        status: body.status ?? 'healthy',
-      })
-      .select()
-      .single();
-    if (error) return bad(error.message, 500);
+    const webinar = await insertOne<{ id: string }>('webinars', {
+      client_id: body.client_id,
+      name: body.name,
+      participants: body.participants ?? 0,
+      reminders: body.reminders ?? 0,
+      attendance: body.attendance ?? 0,
+      webinar_date: body.webinar_date || null,
+      status: body.status ?? 'healthy',
+    });
 
     const stages: StageInput[] = Array.isArray(body.stages) ? body.stages : [];
     if (stages.length) {
@@ -61,10 +55,7 @@ export async function POST(req: Request) {
           failed: Number(s.failed) || 0,
           sort_order: i,
         }));
-      if (rows.length) {
-        const { error: se } = await db.from('webinar_stages').insert(rows);
-        if (se) return bad(se.message, 500);
-      }
+      if (rows.length) await insertMany('webinar_stages', rows);
     }
     return ok(webinar, 201);
   });

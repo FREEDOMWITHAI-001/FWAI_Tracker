@@ -1,0 +1,29 @@
+# Local Postgres for development.
+#
+#   docker compose up -d
+#   npm run migrate
+#
+# Data lives in a named volume, so `docker compose down` keeps it and
+# `docker compose down -v` wipes it.
+
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: fwai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fwai
+      POSTGRES_PASSWORD: fwai_local_dev
+      POSTGRES_DB: fwai
+    ports:
+      - '5433:5432' # 5433 on the host to avoid clashing with a local install
+    volumes:
+      - fwai_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U fwai -d fwai']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  fwai_pgdata:

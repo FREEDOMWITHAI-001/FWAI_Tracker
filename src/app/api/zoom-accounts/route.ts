@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '@/lib/supabase';
+import { insertOne, sql } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
 import { encrypt } from '@/lib/crypto';
 
@@ -7,25 +7,18 @@ export const runtime = 'nodejs';
 // GET /api/zoom-accounts -> accounts WITHOUT secrets, plus client name + session count
 export async function GET() {
   return guard(async () => {
-    const db = supabaseAdmin();
-    const { data, error } = await db
-      .from('zoom_accounts')
-      .select('id, client_id, name, account_id, label, last_synced_at, last_sync_error, created_at, clients(name), zoom_sessions(count)')
-      .order('created_at', { ascending: false });
-    if (error) return bad(error.message, 500);
-    const rows = (data ?? []).map((a: any) => ({
-      id: a.id,
-      client_id: a.client_id,
-      name: a.name,
-      account_id: a.account_id,
-      label: a.label,
-      last_synced_at: a.last_synced_at,
-      last_sync_error: a.last_sync_error,
-      created_at: a.created_at,
-      client_name: a.clients?.name ?? '—',
-      session_count: a.zoom_sessions?.[0]?.count ?? 0,
-    }));
-    return ok(rows);
+    // credentials_encrypted is deliberately not selected — the column never
+    // leaves the server. count(*) arrives as a bigint string, hence Number().
+    const rows = await sql<any>(
+      `select a.id, a.client_id, a.name, a.account_id, a.label,
+              a.last_synced_at, a.last_sync_error, a.created_at,
+              coalesce(c.name, '—') as client_name,
+              (select count(*) from zoom_sessions z where z.zoom_account_id = a.id) as session_count
+         from zoom_accounts a
+         left join clients c on c.id = a.client_id
+        order by a.created_at desc`
+    );
+    return ok(rows.map((a) => ({ ...a, session_count: Number(a.session_count) })));
   });
 }
 
@@ -46,19 +39,24 @@ export async function POST(req: Request) {
       return bad(e instanceof Error ? e.message : 'encryption failed', 500);
     }
 
-    const db = supabaseAdmin();
-    const { data, error } = await db
-      .from('zoom_accounts')
-      .insert({
-        name,
-        client_id,
-        account_id: String(c.account_id),
-        label: String(c.client_id).slice(0, 8) + '…',
-        credentials_encrypted,
-      })
-      .select('id, name, account_id, label, client_id, created_at')
-      .single();
-    if (error) return bad(error.message, 500);
-    return ok(data, 201);
+    const row = await insertOne<any>('zoom_accounts', {
+      name,
+      client_id,
+      account_id: String(c.account_id),
+      label: String(c.client_id).slice(0, 8) + '…',
+      credentials_encrypted,
+    });
+    // Echo back only the non-secret columns the previous .select() returned.
+    return ok(
+      {
+        id: row.id,
+        name: row.name,
+        account_id: row.account_id,
+        label: row.label,
+        client_id: row.client_id,
+        created_at: row.created_at,
+      },
+      201
+    );
   });
 }

@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { jsonb, maybeOne, upsertOne } from '@/lib/db';
 import { encrypt, decrypt } from '@/lib/crypto';
 
 // AI Sensy (WhatsApp) integration. Config is stored in app_settings under the
@@ -28,17 +28,16 @@ export function defaultAisensyConfig(): AisensyConfig {
   };
 }
 
-export async function getAisensyConfig(db: SupabaseClient): Promise<AisensyConfig> {
-  const { data } = await db.from('app_settings').select('value').eq('key', 'aisensy').maybeSingle();
-  if (!data?.value) return defaultAisensyConfig();
-  return { ...defaultAisensyConfig(), ...(data.value as AisensyConfig) };
+export async function getAisensyConfig(): Promise<AisensyConfig> {
+  const row = await maybeOne<{ value: AisensyConfig | null }>(
+    "select value from app_settings where key = 'aisensy'"
+  );
+  if (!row?.value) return defaultAisensyConfig();
+  return { ...defaultAisensyConfig(), ...row.value };
 }
 
-export async function saveAisensyConfig(
-  db: SupabaseClient,
-  patch: Partial<AisensyConfig> & { api_key?: string }
-) {
-  const current = await getAisensyConfig(db);
+export async function saveAisensyConfig(patch: Partial<AisensyConfig> & { api_key?: string }) {
+  const current = await getAisensyConfig();
   const next: AisensyConfig = { ...current, ...patch };
   // If a fresh API key was supplied (not blank), encrypt and store it.
   if (patch.api_key && patch.api_key.trim() && patch.api_key !== '********') {
@@ -46,9 +45,11 @@ export async function saveAisensyConfig(
   }
   // never persist the raw key field
   delete (next as any).api_key;
-  await db
-    .from('app_settings')
-    .upsert({ key: 'aisensy', value: next, updated_at: new Date().toISOString() });
+  await upsertOne(
+    'app_settings',
+    { key: 'aisensy', value: jsonb(next), updated_at: new Date().toISOString() },
+    ['key']
+  );
   return next;
 }
 

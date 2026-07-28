@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { updateById, upsertMany } from '@/lib/db';
 import { decrypt } from '@/lib/crypto';
 
 // Zoom Server-to-Server OAuth client + sync.
@@ -290,7 +290,7 @@ export interface ZoomAccountRow {
 }
 
 // Sync one account: pull sessions, upsert them, stamp last_synced_at/error.
-export async function syncZoomAccount(db: SupabaseClient, account: ZoomAccountRow) {
+export async function syncZoomAccount(account: ZoomAccountRow) {
   let creds: ZoomCreds;
   try {
     creds = JSON.parse(decrypt(account.credentials_encrypted));
@@ -316,17 +316,16 @@ export async function syncZoomAccount(db: SupabaseClient, account: ZoomAccountRo
         attendance_pct: s.attendance_pct,
         updated_at: new Date().toISOString(),
       }));
-      const { error } = await db.from('zoom_sessions').upsert(rows, { onConflict: 'zoom_account_id,zoom_uuid' });
-      if (error) throw new Error(error.message);
+      await upsertMany('zoom_sessions', rows, ['zoom_account_id', 'zoom_uuid']);
     }
-    await db
-      .from('zoom_accounts')
-      .update({ last_synced_at: new Date().toISOString(), last_sync_error: null })
-      .eq('id', account.id);
+    await updateById('zoom_accounts', account.id, {
+      last_synced_at: new Date().toISOString(),
+      last_sync_error: null,
+    });
     return { synced: sessions.length };
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'sync failed';
-    await db.from('zoom_accounts').update({ last_sync_error: msg }).eq('id', account.id);
+    await updateById('zoom_accounts', account.id, { last_sync_error: msg });
     throw e;
   }
 }

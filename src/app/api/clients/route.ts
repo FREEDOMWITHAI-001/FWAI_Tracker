@@ -1,18 +1,19 @@
-import { supabaseAdmin } from '@/lib/supabase';
+import { insertOne, sql } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
 import { rollupStatus, type Status, type ClientSummary } from '@/lib/types';
 
 // GET /api/clients -> client list with derived status + project counts
 export async function GET() {
   return guard(async () => {
-    const db = supabaseAdmin();
-    const { data, error } = await db
-      .from('clients')
-      .select('*, apps(status,uptime)')
-      .order('name', { ascending: true });
-    if (error) return bad(error.message, 500);
+    const data = await sql<any>(
+      `select c.*,
+              coalesce((select json_agg(json_build_object('status', a.status, 'uptime', a.uptime))
+                          from apps a where a.client_id = c.id), '[]'::json) as apps
+         from clients c
+        order by c.name asc`
+    );
 
-    const summaries: ClientSummary[] = (data ?? []).map((c: any) => {
+    const summaries: ClientSummary[] = data.map((c: any) => {
       const apps = (c.apps ?? []) as { status: Status; uptime: number }[];
       const statuses = apps.map((a) => a.status);
       const healthy = statuses.filter((s) => s === 'healthy').length;
@@ -40,13 +41,12 @@ export async function POST(req: Request) {
   return guard(async () => {
     const body = await req.json();
     if (!body?.name) return bad('Name is required');
-    const db = supabaseAdmin();
-    const { data, error } = await db
-      .from('clients')
-      .insert({ name: body.name, industry: body.industry ?? null, alert_name: body.alert_name ?? null, alert_phone: body.alert_phone ?? null })
-      .select()
-      .single();
-    if (error) return bad(error.message, 500);
+    const data = await insertOne('clients', {
+      name: body.name,
+      industry: body.industry ?? null,
+      alert_name: body.alert_name ?? null,
+      alert_phone: body.alert_phone ?? null,
+    });
     return ok(data, 201);
   });
 }

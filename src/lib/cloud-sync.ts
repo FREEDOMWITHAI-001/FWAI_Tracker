@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { insertOne, maybeOne, updateById, upsertOne } from '@/lib/db';
 import { adapters, type Cloud } from '@/lib/cloud';
 import { decrypt } from '@/lib/crypto';
 import type { Status } from '@/lib/types';
@@ -29,7 +29,7 @@ export interface CloudAccountRow {
 // Probe one cloud account: list its instances, best-effort current CPU, and
 // upsert each as a VM under the account's client. Records sync status on the
 // account row. Throws only on a hard failure (e.g. bad credentials).
-export async function syncCloudAccount(db: SupabaseClient, acct: CloudAccountRow) {
+export async function syncCloudAccount(acct: CloudAccountRow) {
   const cloud = acct.provider;
   const adapter = adapters[cloud];
   let creds: string;
@@ -37,7 +37,7 @@ export async function syncCloudAccount(db: SupabaseClient, acct: CloudAccountRow
     creds = decrypt(acct.credentials_encrypted);
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'cannot decrypt credentials';
-    await db.from('cloud_accounts').update({ last_sync_error: msg }).eq('id', acct.id);
+    await updateById('cloud_accounts', acct.id, { last_sync_error: msg });
     throw e;
   }
 
@@ -46,7 +46,7 @@ export async function syncCloudAccount(db: SupabaseClient, acct: CloudAccountRow
     instances = await adapter.listVMs(acct.id, creds);
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'provider list failed';
-    await db.from('cloud_accounts').update({ last_sync_error: msg }).eq('id', acct.id);
+    await updateById('cloud_accounts', acct.id, { last_sync_error: msg });
     throw e;
   }
 
@@ -62,12 +62,10 @@ export async function syncCloudAccount(db: SupabaseClient, acct: CloudAccountRow
     // uptime_label, i.e. the "why it's down"). This way the two never clobber
     // each other. Cloud-only VMs (no SSH) keep their existing behaviour —
     // cloud owns status + cpu exactly as before.
-    const { data: existing } = await db
-      .from('vms')
-      .select('id, ssh_key_encrypted')
-      .eq('cloud_account_id', acct.id)
-      .eq('external_id', vm.id)
-      .maybeSingle();
+    const existing = await maybeOne<{ id: string; ssh_key_encrypted: string | null }>(
+      'select id, ssh_key_encrypted from vms where cloud_account_id = $1 and external_id = $2',
+      [acct.id, vm.id]
+    );
     const hasSsh = !!existing?.ssh_key_encrypted;
 
     let cpu = 0;
@@ -111,25 +109,24 @@ export async function syncCloudAccount(db: SupabaseClient, acct: CloudAccountRow
       upsertRow.cpu = cpu;
     }
 
-    const { data: row } = await db
-      .from('vms')
-      .upsert(upsertRow, { onConflict: 'cloud_account_id,external_id' })
-      .select('id')
-      .single();
+    const row = await upsertOne<{ id: string }>('vms', upsertRow, [
+      'cloud_account_id',
+      'external_id',
+    ]);
 
     // Append a history point so the CPU graph builds up over repeated syncs.
     // Skip it for SSH-backed VMs — the SSH check already records its own,
     // richer history (cpu/mem/disk), and a cloud sample would dilute it.
     if (row?.id && !hasSsh) {
-      await db.from('vm_metrics').insert({ vm_id: row.id, status, response_ms: null, cpu, mem: null, disk: null });
+      await insertOne('vm_metrics', { vm_id: row.id, status, response_ms: null, cpu, mem: null, disk: null });
     }
     imported++;
   }
 
-  await db
-    .from('cloud_accounts')
-    .update({ last_synced_at: new Date().toISOString(), last_sync_error: null })
-    .eq('id', acct.id);
+  await updateById('cloud_accounts', acct.id, {
+    last_synced_at: new Date().toISOString(),
+    last_sync_error: null,
+  });
 
   return { imported };
 }

@@ -1,4 +1,3 @@
-import { supabaseAdmin } from '@/lib/supabase';
 import { ok, bad, guard } from '@/lib/api';
 import { getAisensyConfig, sendAisensy } from '@/lib/aisensy';
 
@@ -11,8 +10,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     const destination = (body?.destination || '').toString();
     if (!destination) return bad('Enter a phone number to send the test to.');
-    const db = supabaseAdmin();
-    const cfg = await getAisensyConfig(db);
+    const cfg = await getAisensyConfig();
     try {
       const out = await sendAisensy(cfg, {
         destination,

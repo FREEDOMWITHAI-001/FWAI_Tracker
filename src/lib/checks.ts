@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { insertOne, maybeOne, updateById } from '@/lib/db';
 import { probe, probePort, type ProbeResult } from '@/lib/healthcheck';
 import { collectSshMetrics, sshPortCheck } from '@/lib/ssh-metrics';
 import { decrypt } from '@/lib/crypto';
@@ -13,7 +13,7 @@ type CheckTarget = Pick<VM, 'id' | 'host' | 'port' | 'health_url'> & {
 
 // Probe one VM, update its current row, and append a metric sample.
 // Order: SSH (CPU/mem/disk) > TCP host:port (reachability) > HTTP Health URL.
-export async function checkVm(db: SupabaseClient, vm: CheckTarget) {
+export async function checkVm(vm: CheckTarget) {
   let r: ProbeResult;
   if (vm.ssh_user && vm.host && vm.ssh_key_encrypted) {
     try {
@@ -43,13 +43,10 @@ export async function checkVm(db: SupabaseClient, vm: CheckTarget) {
   // at the most recent prior sample (recorded below) to decide.
   let displayStatus = r.status;
   if (r.status === 'down') {
-    const { data: last } = await db
-      .from('vm_metrics')
-      .select('status')
-      .eq('vm_id', vm.id)
-      .order('checked_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const last = await maybeOne<{ status: string }>(
+      'select status from vm_metrics where vm_id = $1 order by checked_at desc limit 1',
+      [vm.id]
+    );
     if (!last || last.status !== 'down') displayStatus = 'warning'; // first miss
   }
 
@@ -62,10 +59,10 @@ export async function checkVm(db: SupabaseClient, vm: CheckTarget) {
   if (r.mem != null) patch.mem = r.mem;
   if (r.disk != null) patch.disk = r.disk;
 
-  const { data: updated } = await db.from('vms').update(patch).eq('id', vm.id).select().single();
+  const updated = await updateById('vms', vm.id, patch);
 
   // record the true probe result in history (so misses still show on the graph)
-  await db.from('vm_metrics').insert({
+  await insertOne('vm_metrics', {
     vm_id: vm.id,
     status: r.status,
     response_ms: r.response_ms,
@@ -88,7 +85,7 @@ type AppCheckTarget = Pick<App, 'id' | 'check_url' | 'check_host' | 'check_port'
 //      tunnel through that VM's SSH and check the port on the VM's localhost
 //      (lets app ports stay closed to the public internet).
 //   3) Else external host:port TCP probe.
-export async function checkApp(db: SupabaseClient, app: AppCheckTarget) {
+export async function checkApp(app: AppCheckTarget) {
   let r: ProbeResult | undefined;
 
   // 1) Explicit Check URL wins — probe the public endpoint over HTTP(S).
@@ -98,11 +95,16 @@ export async function checkApp(db: SupabaseClient, app: AppCheckTarget) {
 
   // 2) SSH tunnel via parent VM (keeps app ports off the public internet).
   if (!r && app.vm_id && app.check_port) {
-    const { data: host } = await db
-      .from('vms')
-      .select('host,ssh_user,ssh_port,ssh_key_encrypted,ssh_pass_encrypted')
-      .eq('id', app.vm_id)
-      .single();
+    const host = await maybeOne<{
+      host: string | null;
+      ssh_user: string | null;
+      ssh_port: number | null;
+      ssh_key_encrypted: string | null;
+      ssh_pass_encrypted: string | null;
+    }>(
+      'select host, ssh_user, ssh_port, ssh_key_encrypted, ssh_pass_encrypted from vms where id = $1',
+      [app.vm_id]
+    );
     if (host?.host && host.ssh_user && host.ssh_key_encrypted) {
       try {
         const pr = await sshPortCheck(
@@ -132,29 +134,23 @@ export async function checkApp(db: SupabaseClient, app: AppCheckTarget) {
   // Down only after 2 consecutive misses (see checkVm for rationale).
   let displayStatus = r.status;
   if (r.status === 'down') {
-    const { data: last } = await db
-      .from('app_metrics')
-      .select('status')
-      .eq('app_id', app.id)
-      .order('checked_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const last = await maybeOne<{ status: string }>(
+      'select status from app_metrics where app_id = $1 order by checked_at desc limit 1',
+      [app.id]
+    );
     if (!last || last.status !== 'down') displayStatus = 'warning'; // first miss
   }
 
-  await db
-    .from('apps')
-    .update({
-      status: displayStatus,
-      resp_ms: r.response_ms ?? 0,
-      health: r.detail,
-      last_checked_at: new Date().toISOString(),
-      last_response_ms: r.response_ms,
-    })
-    .eq('id', app.id);
+  await updateById('apps', app.id, {
+    status: displayStatus,
+    resp_ms: r.response_ms ?? 0,
+    health: r.detail,
+    last_checked_at: new Date().toISOString(),
+    last_response_ms: r.response_ms,
+  });
 
   // record the true probe result in history
-  await db.from('app_metrics').insert({ app_id: app.id, status: r.status, response_ms: r.response_ms });
+  await insertOne('app_metrics', { app_id: app.id, status: r.status, response_ms: r.response_ms });
 
   return { skipped: false as const, app_id: app.id, result: r };
 }

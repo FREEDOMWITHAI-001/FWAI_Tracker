@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '@/lib/supabase';
+import { deleteById, maybeOne, updateById } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -8,10 +8,15 @@ const APP_FIELDS = ['vm_id', 'name', 'type', 'host', 'status', 'resp_ms', 'healt
 export async function GET(_req: Request, { params }: Ctx) {
   return guard(async () => {
     const { id } = await params;
-    const db = supabaseAdmin();
-    const { data, error } = await db.from('apps').select('*, clients(name)').eq('id', id).single();
-    if (error) return bad(error.message, 404);
-    return ok({ ...data, client_name: (data as any).clients?.name ?? '—' });
+    const data = await maybeOne(
+      `select a.*, coalesce(c.name, '—') as client_name
+         from apps a
+         left join clients c on c.id = a.client_id
+        where a.id = $1`,
+      [id]
+    );
+    if (!data) return bad('App not found', 404);
+    return ok(data);
   });
 }
 
@@ -21,9 +26,8 @@ export async function PATCH(req: Request, { params }: Ctx) {
     const body = await req.json();
     const patch: Record<string, unknown> = {};
     for (const f of APP_FIELDS) if (body[f] !== undefined) patch[f] = body[f] === '' && f === 'vm_id' ? null : body[f];
-    const db = supabaseAdmin();
-    const { data, error } = await db.from('apps').update(patch).eq('id', id).select().single();
-    if (error) return bad(error.message, 500);
+    const data = await updateById('apps', id, patch);
+    if (!data) return bad('App not found', 404);
     return ok(data);
   });
 }
@@ -31,9 +35,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
 export async function DELETE(_req: Request, { params }: Ctx) {
   return guard(async () => {
     const { id } = await params;
-    const db = supabaseAdmin();
-    const { error } = await db.from('apps').delete().eq('id', id);
-    if (error) return bad(error.message, 500);
+    await deleteById('apps', id);
     return ok({ deleted: true });
   });
 }

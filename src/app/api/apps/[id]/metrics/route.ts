@@ -1,5 +1,5 @@
-import { supabaseAdmin } from '@/lib/supabase';
-import { ok, bad, guard } from '@/lib/api';
+import { sql } from '@/lib/db';
+import { ok, guard } from '@/lib/api';
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -11,22 +11,25 @@ export async function GET(req: Request, { params }: Ctx) {
     const { id } = await params;
     const url = new URL(req.url);
     const range = url.searchParams.get('range') || '1d';
-    const db = supabaseAdmin();
 
-    let q = db
-      .from('app_metrics')
-      .select('checked_at,status,response_ms')
-      .eq('app_id', id)
-      .order('checked_at', { ascending: false })
-      .limit(2000);
-
+    const params_: unknown[] = [id];
+    let cutoffClause = '';
     if (range !== 'all' && RANGE_HOURS[range]) {
-      const cutoff = new Date(Date.now() - RANGE_HOURS[range] * 3600 * 1000).toISOString();
-      q = q.gte('checked_at', cutoff);
+      params_.push(new Date(Date.now() - RANGE_HOURS[range] * 3600 * 1000).toISOString());
+      cutoffClause = `and checked_at >= $${params_.length}`;
     }
 
-    const { data, error } = await q;
-    if (error) return bad(error.message, 500);
-    return ok((data ?? []).slice().reverse());
+    // Newest 2000 within the range, then flipped to oldest-first for the chart.
+    const rows = await sql(
+      `select * from (
+         select checked_at, status, response_ms
+           from app_metrics
+          where app_id = $1 ${cutoffClause}
+          order by checked_at desc
+          limit 2000
+       ) s order by checked_at asc`,
+      params_
+    );
+    return ok(rows);
   });
 }

@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '@/lib/supabase';
+import { sql } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
 import { checkVm, checkApp } from '@/lib/checks';
 import { runAlerts } from '@/lib/alerts';
@@ -22,45 +22,72 @@ export async function GET(req: Request) {
       if (auth !== `Bearer ${secret}`) return bad('Unauthorized', 401);
     }
     const started = Date.now();
-    const db = supabaseAdmin();
 
-    // VMs: anything with SSH, a port, or a Health URL set.
-    const { data: vms } = await db
-      .from('vms')
-      .select('id,host,port,health_url,ssh_user,ssh_port,ssh_key_encrypted,ssh_pass_encrypted')
-      .or('port.not.is.null,health_url.not.is.null,ssh_key_encrypted.not.is.null');
-    let vmsChecked = 0;
-    for (const v of vms ?? []) {
-      try {
-        await checkVm(db, v as any);
-        vmsChecked++;
-      } catch (e: any) {
-        console.error('[cron] checkVm failed', v.id, e?.message);
-      }
-    }
-
-    // Apps: URL, host+port, or VM+port.
-    const { data: apps } = await db
-      .from('apps')
-      .select('id,check_url,check_host,check_port,vm_id');
-    let appsChecked = 0;
-    for (const a of apps ?? []) {
-      if (!a.check_url && !(a.check_host && a.check_port) && !(a.vm_id && a.check_port)) continue;
-      try {
-        await checkApp(db, a as any);
-        appsChecked++;
-      } catch (e: any) {
-        console.error('[cron] checkApp failed', a.id, e?.message);
-      }
-    }
-
-    // Alerts: WhatsApp DOWN / RECOVERY based on what the checks above wrote.
+    // ---- alerts FIRST, deliberately ---------------------------------------
+    // This used to run last, after every probe, and consequently never ran at
+    // all: an unreachable VM's SSH probe costs ~30s plus a retry, so a single
+    // down host exhausted maxDuration and the function was killed before it got
+    // here. The dashboard still showed "down" (checkVm writes status inline)
+    // while no WhatsApp was ever sent — down_since stayed NULL forever.
+    //
+    // Evaluating first means alerts act on the PREVIOUS cycle's statuses, which
+    // are at most one cron interval stale, and can never be starved by a slow
+    // probe. The two-pass safeguard (first sighting starts the clock, a later
+    // pass sends) still holds, so this needs the cron to run every few minutes
+    // — see README for the external-cron setup.
+    let alertsOk = true;
     try {
-      await runAlerts(db);
+      await runAlerts();
     } catch (e: any) {
+      alertsOk = false;
       console.error('[cron] runAlerts failed', e?.message);
     }
 
-    return ok({ vms_checked: vmsChecked, apps_checked: appsChecked, ms: Date.now() - started });
+    // VMs: anything with SSH, a port, or a Health URL set.
+    // Probed in parallel — sequentially, a fleet of SSH hosts cannot fit inside
+    // the function budget once even one of them is unreachable.
+    const vms = await sql<any>(
+      `select id, host, port, health_url, ssh_user, ssh_port, ssh_key_encrypted, ssh_pass_encrypted
+         from vms
+        where port is not null or health_url is not null or ssh_key_encrypted is not null`
+    );
+    const vmResults = await Promise.all(
+      vms.map((v) =>
+        checkVm(v).then(
+          () => true,
+          (e) => {
+            console.error('[cron] checkVm failed', v.id, e?.message);
+            return false;
+          }
+        )
+      )
+    );
+    const vmsChecked = vmResults.filter(Boolean).length;
+
+    // Apps: URL, host+port, or VM+port.
+    const apps = await sql<any>('select id, check_url, check_host, check_port, vm_id from apps');
+    const checkable = apps.filter(
+      (a) => a.check_url || (a.check_host && a.check_port) || (a.vm_id && a.check_port)
+    );
+    const appResults = await Promise.all(
+      checkable.map((a) =>
+        checkApp(a).then(
+          () => true,
+          (e) => {
+            console.error('[cron] checkApp failed', a.id, e?.message);
+            return false;
+          }
+        )
+      )
+    );
+    const appsChecked = appResults.filter(Boolean).length;
+
+    return ok({
+      alerts_evaluated: alertsOk,
+      vms_checked: vmsChecked,
+      vms_total: vms.length,
+      apps_checked: appsChecked,
+      ms: Date.now() - started,
+    });
   });
 }

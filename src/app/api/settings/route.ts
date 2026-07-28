@@ -1,14 +1,12 @@
-import { supabaseAdmin } from '@/lib/supabase';
+import { jsonb, sql, upsertOne } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
 
 // GET /api/settings -> { [key]: value }
 export async function GET() {
   return guard(async () => {
-    const db = supabaseAdmin();
-    const { data, error } = await db.from('app_settings').select('*');
-    if (error) return bad(error.message, 500);
+    const rows = await sql<{ key: string; value: unknown }>('select * from app_settings');
     const map: Record<string, unknown> = {};
-    for (const row of data ?? []) map[(row as any).key] = (row as any).value;
+    for (const row of rows) map[row.key] = row.value;
     return ok(map);
   });
 }
@@ -18,13 +16,11 @@ export async function PUT(req: Request) {
   return guard(async () => {
     const body = await req.json();
     if (!body?.key) return bad('key is required');
-    const db = supabaseAdmin();
-    const { data, error } = await db
-      .from('app_settings')
-      .upsert({ key: body.key, value: body.value ?? {}, updated_at: new Date().toISOString() })
-      .select()
-      .single();
-    if (error) return bad(error.message, 500);
+    const data = await upsertOne(
+      'app_settings',
+      { key: body.key, value: jsonb(body.value ?? {}), updated_at: new Date().toISOString() },
+      ['key']
+    );
     return ok(data);
   });
 }

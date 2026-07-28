@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '@/lib/supabase';
+import { deleteById, updateById } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -15,9 +15,8 @@ export async function PATCH(req: Request, { params }: Ctx) {
     }
     if (body.status === 'resolved') patch.resolved_at = new Date().toISOString();
     if (body.status === 'active') patch.resolved_at = null;
-    const db = supabaseAdmin();
-    const { data, error } = await db.from('alerts').update(patch).eq('id', id).select().single();
-    if (error) return bad(error.message, 500);
+    const data = await updateById('alerts', id, patch);
+    if (!data) return bad('Alert not found', 404);
     return ok(data);
   });
 }
@@ -25,9 +24,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
 export async function DELETE(_req: Request, { params }: Ctx) {
   return guard(async () => {
     const { id } = await params;
-    const db = supabaseAdmin();
-    const { error } = await db.from('alerts').delete().eq('id', id);
-    if (error) return bad(error.message, 500);
+    await deleteById('alerts', id);
     return ok({ deleted: true });
   });
 }

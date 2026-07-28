@@ -54,6 +54,18 @@ export const IconReports = (p: P) => (
     <path d="M8 14l3-3 3 2 4-5" />
   </S>
 );
+export const IconCalling = (p: P) => (
+  <S {...p}>
+    <path d="M4 5c0-1 .8-2 1.8-2h2L9.5 7 7.8 8.6a12 12 0 0 0 5.6 5.6L15 12.5l4 1.7v2c0 1-1 1.8-2 1.8A13 13 0 0 1 4 5z" />
+    <path d="M15 3h6M18 3v6" />
+  </S>
+);
+export const IconUpload = (p: P) => (
+  <S {...p}>
+    <path d="M12 16V4M8 8l4-4 4 4" />
+    <path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" />
+  </S>
+);
 export const IconSettings = (p: P) => (
   <S {...p}>
     <circle cx="12" cy="12" r="3" />

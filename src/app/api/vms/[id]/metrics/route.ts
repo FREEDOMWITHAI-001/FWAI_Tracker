@@ -1,5 +1,5 @@
-import { supabaseAdmin } from '@/lib/supabase';
-import { ok, bad, guard } from '@/lib/api';
+import { sql } from '@/lib/db';
+import { ok, guard } from '@/lib/api';
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -20,22 +20,26 @@ export async function GET(req: Request, { params }: Ctx) {
     const { id } = await params;
     const url = new URL(req.url);
     const range = url.searchParams.get('range') || '1d';
-    const db = supabaseAdmin();
 
-    let q = db
-      .from('vm_metrics')
-      .select('checked_at,status,response_ms,cpu,mem,disk')
-      .eq('vm_id', id)
-      .order('checked_at', { ascending: false })
-      .limit(2000);
-
+    const params_: unknown[] = [id];
+    let cutoffClause = '';
     if (range !== 'all' && RANGE_HOURS[range]) {
-      const cutoff = new Date(Date.now() - RANGE_HOURS[range] * 3600 * 1000).toISOString();
-      q = q.gte('checked_at', cutoff);
+      params_.push(new Date(Date.now() - RANGE_HOURS[range] * 3600 * 1000).toISOString());
+      cutoffClause = `and checked_at >= $${params_.length}`;
     }
 
-    const { data, error } = await q;
-    if (error) return bad(error.message, 500);
-    return ok((data ?? []).slice().reverse());
+    // Take the newest 2000 within the range, then flip to oldest-first for the
+    // chart — same two-step the previous limit+reverse did.
+    const rows = await sql(
+      `select * from (
+         select checked_at, status, response_ms, cpu, mem, disk
+           from vm_metrics
+          where vm_id = $1 ${cutoffClause}
+          order by checked_at desc
+          limit 2000
+       ) s order by checked_at asc`,
+      params_
+    );
+    return ok(rows);
   });
 }

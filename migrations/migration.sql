@@ -142,12 +142,21 @@ create table if not exists public.uptime_samples (
 -- Seed the integration rows + default notification settings (optional but
 -- harmless on an empty start; comment out if you want a truly blank slate).
 -- ---------------------------------------------------------------------------
-insert into public.integrations (name, detail, status, sort_order) values
+-- Seed the default integration rows, once. `on conflict do nothing` does NOT
+-- make this idempotent on its own: id defaults to gen_random_uuid(), so every
+-- run produces a brand-new key that conflicts with nothing and inserts a fourth
+-- copy. Guarding on the name is what actually makes a re-run a no-op.
+insert into public.integrations (name, detail, status, sort_order)
+select v.name, v.detail, v.status, v.sort_order
+from (values
   ('AWS (EC2)',          'Read-only · ap-south-1',            'healthy', 1),
   ('Zoom',               'Server-to-Server OAuth',            'healthy', 2),
   ('WhatsApp Business',  'Twilio · Ops group',                'healthy', 3),
   ('GoHighLevel',        'Webinar email delivery',            'warning', 4)
-on conflict do nothing;
+) as v(name, detail, status, sort_order)
+where not exists (
+  select 1 from public.integrations i where i.name = v.name
+);
 
 insert into public.app_settings (key, value) values
   ('notifications', '{"whatsapp": true, "email_digest": true, "throttle": true}'::jsonb)
