@@ -60,9 +60,17 @@ export async function runAlerts() {
         }
         const downMs = now - new Date(t.down_since).getTime();
         if (t.alerted) {
+          if (!t.last_alerted_at) {
+            // alerted=true from before this column existed (or any other gap
+            // that left it unset) — start the repeat clock now rather than
+            // treating "no timestamp" as "infinitely overdue", which would
+            // fire an immediate repeat instead of waiting REPEAT_ALERT_MS.
+            await updateById(table, t.id, { last_alerted_at: new Date().toISOString() });
+            continue;
+          }
           // Already alerted once — only re-alert after REPEAT_ALERT_MS of
           // continued downtime, so an ongoing incident isn't silent for days.
-          const sinceLastMs = t.last_alerted_at ? now - new Date(t.last_alerted_at).getTime() : Infinity;
+          const sinceLastMs = now - new Date(t.last_alerted_at).getTime();
           if (sinceLastMs < REPEAT_ALERT_MS) continue;
         } else if (downMs < thresholdMs) {
           continue;
