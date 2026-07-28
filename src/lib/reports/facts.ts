@@ -52,6 +52,7 @@ export interface FactBuild {
   unattributed_orders: OrderRecord[];
   cost: { talk_minutes: number; amount: number | null; from_file: boolean };
   ai_weeks: string[];
+  has_leads: boolean; // a leads/registrations file was uploaded at all
   has_talk_turns: boolean;
   has_manual_calls: boolean;
   has_comeback_source: boolean;
@@ -501,6 +502,13 @@ export function buildFacts(
   // dialled — "registered" falls back to "was called" instead of being
   // false for everyone.
   const hasLeads = by('leads').length > 0;
+  if (!hasLeads) {
+    notes.push(
+      'No leads/registrations file was uploaded, so the population is everyone the AI called instead of a ' +
+        'registration list — the phone/attendee match-rate checks against leads are skipped rather than showing a ' +
+        'false 0%.'
+    );
+  }
 
   // --------------------------------------------------------------- comeback
   const comeback = new Map<string, string>(); // personKey -> earliest click
@@ -780,6 +788,7 @@ export function buildFacts(
     unattributed_orders: unattributed,
     cost: { talk_minutes: Math.round(talkMinutes * 100) / 100, amount: costAmount, from_file: costFromFile },
     ai_weeks: aiWeeks,
+    has_leads: hasLeads,
     has_talk_turns: hasTalkTurns,
     has_manual_calls: hasManual,
     has_comeback_source: hasComebackSource,

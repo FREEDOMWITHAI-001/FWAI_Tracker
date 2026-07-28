@@ -23,8 +23,11 @@ export function buildQuality(
   const pctDisplay = (v: number) => `${(v * 100).toFixed(1)}%`;
 
   // --- identity ------------------------------------------------------------
+  // Both match-rate checks below compare against the leads file, so they are
+  // meaningless (and would misreport a false "0% matched, blocking" state)
+  // when no leads/registrations file was uploaded at all — leads is optional.
   const callMatch = rate(s.calls.matched_to_leads, s.calls.unique_people);
-  if (s.calls.unique_people > 0) {
+  if (build.has_leads && s.calls.unique_people > 0) {
     m.push({
       key: 'phone_match_rate',
       label: 'Phone match rate — call log → leads',
@@ -40,7 +43,7 @@ export function buildQuality(
   }
 
   const attMatch = rate(s.attendance.matched_to_leads, s.attendance.unique_people);
-  if (s.attendance.unique_people > 0) {
+  if (build.has_leads && s.attendance.unique_people > 0) {
     m.push({
       key: 'attendance_match_rate',
       label: 'Attendee match rate — attendance → leads',

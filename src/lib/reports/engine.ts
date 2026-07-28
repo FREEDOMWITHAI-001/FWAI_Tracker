@@ -55,7 +55,7 @@ export function runReport(input: RunInput): RunOutput {
   // With no leads/registrations file, `registered` (set in facts.ts) already
   // falls back to "was dialled" per-fact — reflect that in the label too, so
   // the sheet doesn't claim a registration list that was never uploaded.
-  const hasLeads = build.stats.leads.unique_people > 0;
+  const hasLeads = build.has_leads;
   const registered = analysis.filter((f) => f.registered);
   const denominator = registered.length || analysis.length;
   const denominatorLabel = !registered.length
