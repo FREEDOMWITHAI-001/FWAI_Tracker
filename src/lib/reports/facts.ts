@@ -146,9 +146,16 @@ function identify(
 // List price for a product, used to value a 100%-off coupon order.
 // Longest match wins so "AI Mastery Pro" beats a generic "AI Mastery" rule.
 function priceForProduct(product: string, a: Assumptions): number | null {
-  const p = (product ?? '').toLowerCase();
+  const p = (product ?? '').toLowerCase().trim();
+  const prices = a.product_prices ?? [];
+  // No product name to match against (no product column, or the row's cell is
+  // blank) — with exactly one price configured, there's only one thing it
+  // could mean: that's the price, full stop. Without this, a single-product
+  // client with no product column would have to duplicate the same number
+  // into "Order value when the file has no amount column" too.
+  if (!p && prices.length === 1) return Number(prices[0].price) || null;
   let best: { len: number; price: number } | null = null;
-  for (const pp of a.product_prices ?? []) {
+  for (const pp of prices) {
     const m = (pp.match ?? '').trim().toLowerCase();
     if (!m || !p.includes(m)) continue;
     if (!best || m.length > best.len) best = { len: m.length, price: Number(pp.price) || 0 };
