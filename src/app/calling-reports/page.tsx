@@ -201,6 +201,7 @@ function NewReportDialog({
   const [periodLabel, setPeriodLabel] = useState('');
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
+  const [totalCost, setTotalCost] = useState('');
   const [copyFrom, setCopyFrom] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -215,6 +216,7 @@ function NewReportDialog({
     if (!name.trim()) return setErr('Give the report a name.');
     setBusy(true);
     try {
+      const cost = totalCost.trim() ? Number(totalCost) : null;
       const r = await api.post<{ id: string }>('/api/calling-reports', {
         client_id: clientId,
         name: name.trim(),
@@ -222,6 +224,7 @@ function NewReportDialog({
         period_label: periodLabel.trim() || null,
         period_start: start || null,
         period_end: end || null,
+        assumptions: cost != null && !Number.isNaN(cost) ? { fixed_cost: cost } : undefined,
         copy_from: copyFrom || null,
       });
       onCreated(r.id);
@@ -256,7 +259,10 @@ function NewReportDialog({
       <Field label="Format" hint={template?.description ?? undefined}>
         <StatusSelect value={templateKey} onChange={setTemplateKey} options={templates.map((t) => ({ value: t.key, label: t.name }))} />
       </Field>
-      <Field label="Period label" hint="Shown on the workbook header, e.g. “Jun 17 – Jul 8, 2026”.">
+      <Field
+        label="Period label"
+        hint="Shown on the workbook header, e.g. “Webinar Sun 19 Jul 2026, 11:00 AM · 2,492 registered leads (12 Jul 11am – 19 Jul 11am)”."
+      >
         <input className="input" value={periodLabel} onChange={(e) => setPeriodLabel(e.target.value)} />
       </Field>
       <div className="field-row">
@@ -267,6 +273,20 @@ function NewReportDialog({
           <input className="input" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
         </Field>
       </div>
+      <Field
+        label="Total cost (₹, optional)"
+        hint="Call credits / telephony spend for this period, for the ROI block — skip this if you're uploading a cost file instead."
+      >
+        <input
+          className="input"
+          type="number"
+          min="0"
+          step="1"
+          value={totalCost}
+          onChange={(e) => setTotalCost(e.target.value)}
+          placeholder="e.g. 5000"
+        />
+      </Field>
       {priors.length > 0 && (
         <Field label="Copy assumptions from" hint="Inherits every knob — attribution window, bot names, notional price, exclusions.">
           <StatusSelect
