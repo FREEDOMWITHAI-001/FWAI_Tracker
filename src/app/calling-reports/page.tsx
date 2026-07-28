@@ -202,6 +202,7 @@ function NewReportDialog({
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
   const [totalCost, setTotalCost] = useState('');
+  const [productPrice, setProductPrice] = useState('');
   const [copyFrom, setCopyFrom] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -217,6 +218,10 @@ function NewReportDialog({
     setBusy(true);
     try {
       const cost = totalCost.trim() ? Number(totalCost) : null;
+      const price = productPrice.trim() ? Number(productPrice) : null;
+      const assumptions: Record<string, number> = {};
+      if (cost != null && !Number.isNaN(cost)) assumptions.fixed_cost = cost;
+      if (price != null && !Number.isNaN(price)) assumptions.default_order_value = price;
       const r = await api.post<{ id: string }>('/api/calling-reports', {
         client_id: clientId,
         name: name.trim(),
@@ -224,7 +229,7 @@ function NewReportDialog({
         period_label: periodLabel.trim() || null,
         period_start: start || null,
         period_end: end || null,
-        assumptions: cost != null && !Number.isNaN(cost) ? { fixed_cost: cost } : undefined,
+        assumptions: Object.keys(assumptions).length ? assumptions : undefined,
         copy_from: copyFrom || null,
       });
       onCreated(r.id);
@@ -273,20 +278,36 @@ function NewReportDialog({
           <input className="input" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
         </Field>
       </div>
-      <Field
-        label="Total cost (₹, optional)"
-        hint="Call credits / telephony spend for this period, for the ROI block — skip this if you're uploading a cost file instead."
-      >
-        <input
-          className="input"
-          type="number"
-          min="0"
-          step="1"
-          value={totalCost}
-          onChange={(e) => setTotalCost(e.target.value)}
-          placeholder="e.g. 5000"
-        />
-      </Field>
+      <div className="field-row">
+        <Field
+          label="Total cost (₹, optional)"
+          hint="Call credits / telephony spend for this period, for the ROI block — skip this if you're uploading a cost file instead."
+        >
+          <input
+            className="input"
+            type="number"
+            min="0"
+            step="1"
+            value={totalCost}
+            onChange={(e) => setTotalCost(e.target.value)}
+            placeholder="e.g. 5000"
+          />
+        </Field>
+        <Field
+          label="Product price (₹, optional)"
+          hint="Used for revenue/ROI when the sales file has no amount column, or for ₹0 coupon orders — skip if the sales file already has prices."
+        >
+          <input
+            className="input"
+            type="number"
+            min="0"
+            step="1"
+            value={productPrice}
+            onChange={(e) => setProductPrice(e.target.value)}
+            placeholder="e.g. 4999"
+          />
+        </Field>
+      </div>
       {priors.length > 0 && (
         <Field label="Copy assumptions from" hint="Inherits every knob — attribution window, bot names, notional price, exclusions.">
           <StatusSelect

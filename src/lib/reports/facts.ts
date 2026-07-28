@@ -143,18 +143,6 @@ function identify(
   return { key, phone: ph.digits, email, name };
 }
 
-// Does this order's coupon field count as a real discount code?
-// An empty coupon_codes list means "any non-empty coupon value counts", which is
-// the common case — most clients just want ₹0-with-a-code to be a sale. Listing
-// codes narrows it to specific campaigns.
-function hasCoupon(coupon: string, codes: string[]): boolean {
-  const c = coupon.trim().toLowerCase();
-  if (!c) return false;
-  const wanted = codes.map((x) => x.trim().toLowerCase()).filter(Boolean);
-  if (!wanted.length) return true;
-  return wanted.some((w) => c === w || c.includes(w));
-}
-
 // List price for a product, used to value a 100%-off coupon order.
 // Longest match wins so "AI Mastery Pro" beats a generic "AI Mastery" rule.
 function priceForProduct(product: string, a: Assumptions): number | null {
@@ -368,10 +356,9 @@ export function buildFacts(
     const s = sessions.get(key);
     if (s) s.attendees = set.size;
   }
-  // Zoom practice/test rooms: tiny sessions distort per-webinar averages.
-  for (const s of sessions.values()) {
-    if (s.key !== '__all__' && s.attendees > 0 && s.attendees < a.min_session_attendees) s.excluded = true;
-  }
+  // Test-room filtering by attendee count removed — every session with any
+  // attendance counts (min_session_attendees is kept on Assumptions for
+  // stored-report compatibility but is no longer read here).
 
   const orderedSessions = [...sessions.values()].sort((x, y) => (x.date ?? '').localeCompare(y.date ?? ''));
   const datedSessions = orderedSessions.filter((s) => s.date && !s.excluded);
@@ -572,36 +559,20 @@ export function buildFacts(
       const product = pick(row, ds.mapping, 'product');
       const coupon = pick(row, ds.mapping, 'coupon').trim();
 
-      // A ₹0 row is either a 100%-off coupon (a real sale worth the product's
-      // list price) or a test/free row. The coupon code is the only thing that
-      // tells them apart, so it drives the valuation.
+      // Every row in the sales file is a real order — a ₹0 amount (with or
+      // without a coupon code) is valued at the product's list price instead
+      // of being dropped or left worth ₹0, so nothing needs a coupon-code
+      // configuration to be counted.
       let amount: number;
-      let zeroDrop = false;
       if (raw == null) {
         // No amount column at all — fall back to the list price for the product,
         // else the flat default. The quality panel blocks the run if neither is set.
         amount = priceForProduct(product, a) ?? a.default_order_value ?? 0;
       } else if (raw === 0) {
-        if (hasCoupon(coupon, a.coupon_codes)) {
-          couponZeroCount++;
-          // "Consider the actual product price, not the 0."
-          amount = priceForProduct(product, a) ?? a.default_order_value ?? a.zero_order_value;
-        } else if (a.zero_without_coupon === 'exclude') {
-          zeroDrop = true;
-          amount = 0;
-        } else if (a.zero_without_coupon === 'count_notional') {
-          amount = a.zero_order_value;
-        } else {
-          amount = 0; // count_zero: a real buyer worth no revenue
-        }
+        couponZeroCount++;
+        amount = priceForProduct(product, a) ?? a.default_order_value ?? a.zero_order_value;
       } else {
         amount = raw;
-      }
-
-      if (zeroDrop) {
-        zeroNoCouponCount++;
-        stats.sales.zero_dropped++;
-        continue; // not a sale at all under the current rule
       }
 
       const relevant = !a.exclude_products.some((x) => x && product.toLowerCase().includes(x.toLowerCase()));
@@ -684,7 +655,11 @@ export function buildFacts(
       const session = sessions.get(sk);
       const aRec = att?.get(sk);
       const watch = aRec?.watch ?? null;
-      const showed = !!aRec && (watch == null || watch >= a.showed_up_min_minutes);
+      // Presence in the attendance file is enough to count as showed-up — no
+      // minimum-watch-time floor. (showed_up_min_minutes / left_early_minutes
+      // are kept on Assumptions for stored-report compatibility but are no
+      // longer read here.)
+      const showed = !!aRec;
       const turns = call?.talk_turns ?? null;
 
       // "Actually talked" = connected AND the longest single call cleared the
@@ -715,7 +690,7 @@ export function buildFacts(
         call_seconds: call ? Math.round(call.seconds) : null,
         showed_up: showed,
         watch_minutes: watch,
-        left_early: showed && watch != null && watch < a.left_early_minutes,
+        left_early: false, // "left early" concept removed along with the watch-time floor
         came_back: hasComebackSource ? comeback.has(key) : (aRec?.joins ?? 0) > 1,
         bought: false,
         order_value: null,

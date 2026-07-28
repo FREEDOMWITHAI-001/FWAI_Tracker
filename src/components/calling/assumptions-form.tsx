@@ -120,31 +120,9 @@ export function AssumptionsForm({
       </Section>
 
       <Section title="Attendance">
-        <div className="field-row-3">
-          <Field label="Minutes to count as showed up">
-            <input
-              className="input"
-              type="number"
-              value={value.showed_up_min_minutes}
-              onChange={(e) => num('showed_up_min_minutes', e.target.value)}
-            />
-          </Field>
-          <Field label="Left early below (minutes)">
-            <input
-              className="input"
-              type="number"
-              value={value.left_early_minutes}
-              onChange={(e) => num('left_early_minutes', e.target.value)}
-            />
-          </Field>
-          <Field label="Minimum attendees per session" hint="Below this a session is treated as a Zoom test room.">
-            <input
-              className="input"
-              type="number"
-              value={value.min_session_attendees}
-              onChange={(e) => num('min_session_attendees', e.target.value)}
-            />
-          </Field>
+        <div className="tip" style={{ fontSize: 12, marginBottom: 10 }}>
+          Anyone present in the attendance file counts as showed-up — no minimum watch time, no small-session
+          filtering.
         </div>
         <Field
           label="When both an upload and the Zoom API cover a session"
@@ -186,7 +164,7 @@ export function AssumptionsForm({
               onChange={(e) => num('attribution_days', e.target.value)}
             />
           </Field>
-          <Field label="Notional value of a ₹0 / 100%-off order" hint="Fallback only — a coupon ₹0 order prefers the product price below.">
+          <Field label="Notional value of a ₹0 / 100%-off order" hint="Fallback only — used when neither a product price nor the default order value below is set.">
             <input
               className="input"
               type="number"
@@ -195,31 +173,9 @@ export function AssumptionsForm({
             />
           </Field>
         </div>
-        <Field
-          label="Coupon codes that make a ₹0 order real"
-          hint="Comma separated. Leave blank to accept ANY non-empty coupon value. A ₹0 order with a matching code is valued at the product price below."
-        >
-          <input
-            className="input"
-            value={value.coupon_codes.join(', ')}
-            onChange={(e) => set('coupon_codes', list(e.target.value))}
-            placeholder="FREE100, LAUNCH, VIPACCESS"
-          />
-        </Field>
-        <Field
-          label="₹0 orders with NO coupon code"
-          hint="If a client's export simply has no coupon column, “Drop” will silently remove real sales — the Data quality panel reports the count either way."
-        >
-          <StatusSelect
-            value={value.zero_without_coupon}
-            onChange={(v) => set('zero_without_coupon', v as Assumptions['zero_without_coupon'])}
-            options={[
-              { value: 'exclude', label: 'Drop them — treat as test / free rows' },
-              { value: 'count_zero', label: 'Count as buyers, ₹0 revenue' },
-              { value: 'count_notional', label: 'Count and apply the notional value' },
-            ]}
-          />
-        </Field>
+        <div className="tip" style={{ fontSize: 12, marginBottom: 10 }}>
+          Every ₹0 order is counted as a real sale and valued at the product price below — no coupon code needed.
+        </div>
         <ProductPrices value={value} onChange={onChange} />
         <div className="field-row">
           <Field label="Order value when the file has no amount column" hint="Blank = treat as ₹0.">

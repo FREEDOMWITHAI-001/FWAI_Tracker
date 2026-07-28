@@ -189,34 +189,18 @@ export function buildQuality(
     });
   }
 
-  // --- ₹0 orders and coupons ----------------------------------------------
+  // --- ₹0 orders ------------------------------------------------------------
+  // Every ₹0 row is counted as a real sale and valued at the product's list
+  // price — no coupon-code configuration required, none are ever dropped.
   const sm = build.sales_meta;
   if (sm.coupon_zero > 0) {
     m.push({
-      key: 'coupon_zero_orders',
-      label: '₹0 orders accepted on a coupon code',
+      key: 'zero_amount_orders',
+      label: '₹0 orders valued at product price',
       value: sm.coupon_zero,
       display: sm.coupon_zero.toLocaleString(),
       severity: 'ok',
-      detail:
-        `100%-off orders carrying a coupon code — counted as real sales and valued at the product's list price` +
-        (a.coupon_codes.length ? ` (codes matched: ${a.coupon_codes.join(', ')}).` : ' (any coupon code counts).'),
-    });
-  }
-  if (sm.zero_no_coupon > 0) {
-    const dropped = a.zero_without_coupon === 'exclude';
-    m.push({
-      key: 'zero_no_coupon_orders',
-      label: dropped ? '₹0 orders DROPPED (no coupon code)' : '₹0 orders with no coupon code',
-      value: sm.zero_no_coupon,
-      display: sm.zero_no_coupon.toLocaleString(),
-      severity: dropped ? 'warn' : 'ok',
-      detail: dropped
-        ? 'Treated as test/free rows and excluded from buyers, rates and revenue. If this export simply has no coupon column, ' +
-          'these were real sales — change "₹0 orders with no coupon" in Assumptions and re-run.'
-        : a.zero_without_coupon === 'count_notional'
-          ? `Counted as buyers and valued at ₹${a.zero_order_value.toLocaleString()} each (notional).`
-          : 'Counted as buyers with ₹0 revenue.',
+      detail: 'Orders with a ₹0 amount — counted as real sales and valued at the configured product price, not ₹0.',
     });
   }
   // "Ask for the product price" — enforced, not merely suggested. Without a
