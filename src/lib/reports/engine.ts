@@ -52,13 +52,21 @@ export function runReport(input: RunInput): RunOutput {
 
   // ---- denominator lock -------------------------------------------------
   // One population, computed once, used by every block and every lens table.
+  // With no leads/registrations file, `registered` (set in facts.ts) already
+  // falls back to "was dialled" per-fact — reflect that in the label too, so
+  // the sheet doesn't claim a registration list that was never uploaded.
+  const hasLeads = build.stats.leads.unique_people > 0;
   const registered = analysis.filter((f) => f.registered);
   const denominator = registered.length || analysis.length;
-  const denominatorLabel = registered.length
-    ? a.dedup_mode === 'unique_member'
-      ? 'Unique registered members'
-      : 'Registration rows'
-    : 'People seen in any input file';
+  const denominatorLabel = !registered.length
+    ? 'People seen in any input file'
+    : hasLeads
+      ? a.dedup_mode === 'unique_member'
+        ? 'Unique registered members'
+        : 'Registration rows'
+      : a.dedup_mode === 'unique_member'
+        ? 'Unique called people (no registration file provided)'
+        : 'Call rows (no registration file provided)';
 
   // Per-bot (L5) is wanted on EVERY report, not just the per-bot template, so it
   // is forced in here rather than added to each template's lens list — that list
@@ -74,7 +82,7 @@ export function runReport(input: RunInput): RunOutput {
   const perWebinar = buildPerWebinar(build.facts, build.sessions);
   const whoBought = buildWhoBought(build);
   const buyersTalked = buildBuyersTalked(whoBought, build, a);
-  const registeredVsRetargeted = buildRegisteredVsRetargeted(analysis);
+  const registeredVsRetargeted = buildRegisteredVsRetargeted(analysis, hasLeads);
   const aiVsManual = buildAiVsManual(analysis, perWebinar, input.datasets);
   const scorecard = buildScorecard(analysis, lenses, roi, template, a, denominator, denominatorLabel);
 
@@ -296,7 +304,8 @@ function buildBuyersTalked(
 
 // --- registered vs retargeted -----------------------------------------------
 
-function buildRegisteredVsRetargeted(facts: Fact[]): RegisteredRetargetedBlock {
+function buildRegisteredVsRetargeted(facts: Fact[], hasLeads: boolean): RegisteredRetargetedBlock {
+  const basis: 'leads' | 'called' = hasLeads ? 'leads' : 'called';
   const registered = facts.filter((f) => f.registered);
   const retargeted = facts.filter((f) => !f.registered && (f.showed_up || f.bought));
 
@@ -304,6 +313,7 @@ function buildRegisteredVsRetargeted(facts: Fact[]): RegisteredRetargetedBlock {
     return {
       available: false,
       reason: 'No leads/registrations file is present, so nobody can be marked "registered".',
+      basis,
       attended_registered: 0,
       attended_retargeted: 0,
       bought_registered: 0,
@@ -313,7 +323,11 @@ function buildRegisteredVsRetargeted(facts: Fact[]): RegisteredRetargetedBlock {
   if (!retargeted.length) {
     return {
       available: false,
-      reason: 'Every attendee/buyer was on the registration list — nobody attended or bought without registering.',
+      reason:
+        basis === 'leads'
+          ? 'Every attendee/buyer was on the registration list — nobody attended or bought without registering.'
+          : 'Every attendee/buyer was dialled — nobody attended or bought without being called.',
+      basis,
       attended_registered: registered.filter((f) => f.showed_up).length,
       attended_retargeted: 0,
       bought_registered: registered.filter((f) => f.bought).length,
@@ -322,6 +336,7 @@ function buildRegisteredVsRetargeted(facts: Fact[]): RegisteredRetargetedBlock {
   }
   return {
     available: true,
+    basis,
     attended_registered: registered.filter((f) => f.showed_up).length,
     attended_retargeted: retargeted.filter((f) => f.showed_up).length,
     bought_registered: registered.filter((f) => f.bought).length,

@@ -496,6 +496,11 @@ export function buildFacts(
       if (key) touchSession(key, { date: day });
     }
   }
+  // No leads/registrations file uploaded at all: there is no registration
+  // list to compare against, so the population becomes whoever we actually
+  // dialled — "registered" falls back to "was called" instead of being
+  // false for everyone.
+  const hasLeads = by('leads').length > 0;
 
   // --------------------------------------------------------------- comeback
   const comeback = new Map<string, string>(); // personKey -> earliest click
@@ -682,13 +687,14 @@ export function buildFacts(
       const connected =
         a.talk_rule === 'tighten_connected' ? clearedFloor : !!call?.connected;
 
+      const registered = hasLeads ? !!lead : !!call;
       const fact: Fact = {
         person_key: key,
         session_key: sk,
         name: ref.name ?? aRec?.ref.name ?? null,
         phone: ref.phone,
         email: ref.email,
-        registered: !!lead,
+        registered,
         dialled: !!call,
         connected,
         talk_turns: turns,
@@ -706,7 +712,7 @@ export function buildFacts(
         bought: false,
         order_value: null,
         order_time: null,
-        holdout: !!lead && !call,
+        holdout: registered && !call,
         week: session?.week ?? null,
         session_date: session?.date ?? null,
         ai_week: false,

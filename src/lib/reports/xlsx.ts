@@ -211,8 +211,11 @@ function sheetScorecard(wb: ExcelJS.Workbook, r: ReportResult, meta: WorkbookMet
   const rr = r.registered_vs_retargeted;
   if (rr.available) {
     row++;
-    row = sectionBar(ws, row, '5.  Registered vs Retargeted', span);
-    row = headerRow(ws, row, ['', 'Registered', 'Retargeted*', 'Total', '']);
+    const title = rr.basis === 'leads' ? '5.  Registered vs Retargeted' : '5.  Called vs Organic';
+    const leftCol = rr.basis === 'leads' ? 'Registered' : 'Called';
+    const rightCol = rr.basis === 'leads' ? 'Retargeted*' : 'Organic*';
+    row = sectionBar(ws, row, title, span);
+    row = headerRow(ws, row, ['', leftCol, rightCol, 'Total', '']);
     const totalAttended = rr.attended_registered + rr.attended_retargeted;
     const totalBought = rr.bought_registered + rr.bought_retargeted;
     row = dataRow(ws, row, ['Attended the webinar', rr.attended_registered, rr.attended_retargeted, totalAttended, ''], {
@@ -226,8 +229,11 @@ function sheetScorecard(wb: ExcelJS.Workbook, r: ReportResult, meta: WorkbookMet
     row = noteRow(
       ws,
       row,
-      '*Retargeted = attended or bought but never appeared in a leads/registrations file — reached some other way ' +
-        '(a prior week\'s list, a direct link, WhatsApp, etc.), not on this report\'s registration list.',
+      rr.basis === 'leads'
+        ? '*Retargeted = attended or bought but never appeared in a leads/registrations file — reached some other ' +
+          'way (a prior week\'s list, a direct link, WhatsApp, etc.), not on this report\'s registration list.'
+        : '*No leads/registrations file was provided for this report, so "Called" falls back to whoever the AI ' +
+          'dialled. Organic = attended or bought without ever being called.',
       span,
       30
     );

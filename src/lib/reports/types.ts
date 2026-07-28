@@ -318,11 +318,13 @@ export interface BuyersTalkedBlock {
 // Split of "who showed up / bought" by whether the person was on this
 // report's registration list at all. "Retargeted" = showed up or bought but
 // never appeared in a leads file — re-engaged some other way (WhatsApp,
-// direct link, a prior week's list). Only meaningful when a leads file is
-// present; with no leads file everyone is trivially "retargeted".
+// direct link, a prior week's list). With no leads file, `registered` falls
+// back to "was dialled" (see facts.ts), so this becomes Called vs Organic —
+// `basis` tells the renderer which framing applies.
 export interface RegisteredRetargetedBlock {
   available: boolean;
   reason?: string;
+  basis: 'leads' | 'called';
   attended_registered: number;
   attended_retargeted: number;
   bought_registered: number;

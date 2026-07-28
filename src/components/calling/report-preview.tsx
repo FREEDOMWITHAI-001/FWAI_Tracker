@@ -361,19 +361,24 @@ function RegisteredRetargeted({ result }: { result: ReportResult }) {
   const b = result.registered_vs_retargeted;
   const totalAttended = b.attended_registered + b.attended_retargeted;
   const totalBought = b.bought_registered + b.bought_retargeted;
+  const onLeads = b.basis === 'leads';
   return (
     <div className="card" style={{ marginBottom: 16 }}>
       <div className="card-h">
-        <h3>Registered vs Retargeted</h3>
-        <span className="updated">who was on this report&apos;s registration list, and who wasn&apos;t</span>
+        <h3>{onLeads ? 'Registered vs Retargeted' : 'Called vs Organic'}</h3>
+        <span className="updated">
+          {onLeads
+            ? "who was on this report's registration list, and who wasn't"
+            : 'no registration file was provided, so this splits by whether the AI called them'}
+        </span>
       </div>
       <div className="tbl-wrap">
         <table className="data">
           <thead>
             <tr>
               <th></th>
-              <th>Registered</th>
-              <th>Retargeted*</th>
+              <th>{onLeads ? 'Registered' : 'Called'}</th>
+              <th>{onLeads ? 'Retargeted*' : 'Organic*'}</th>
               <th>Total</th>
             </tr>
           </thead>
@@ -395,8 +400,9 @@ function RegisteredRetargeted({ result }: { result: ReportResult }) {
       </div>
       <div className="card-b" style={{ borderTop: '1px solid var(--border-2)' }}>
         <div className="sub" style={{ color: 'var(--muted)', fontSize: 12.5 }}>
-          *Retargeted = attended or bought but never appeared in a leads/registrations file — reached some other way
-          (a prior week&apos;s list, a direct link, WhatsApp, etc.), not on this report&apos;s registration list.
+          {onLeads
+            ? "*Retargeted = attended or bought but never appeared in a leads/registrations file — reached some other way (a prior week's list, a direct link, WhatsApp, etc.), not on this report's registration list."
+            : '*No leads/registrations file was provided for this report, so "Called" falls back to whoever the AI dialled. Organic = attended or bought without ever being called.'}
         </div>
       </div>
     </div>
