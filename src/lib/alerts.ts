@@ -2,12 +2,15 @@ import { sql, updateById } from '@/lib/db';
 import { getAisensyConfig, sendAisensy } from '@/lib/aisensy';
 
 // Evaluate every VM/app and send WhatsApp alerts via AI Sensy when something
-// has been DOWN longer than the configured threshold. Sends once per incident
+// has been DOWN longer than the configured threshold. Sends once when the
+// incident starts, then re-sends every REPEAT_ALERT_MS while it's still down,
 // and (optionally) a recovery message when it comes back.
 //
 // Recipient = the target's own alert_phone, else its client's alert_phone.
 // Template params sent (in order): [name, client, status, minutes]
 //   status is "DOWN" or "BACK UP" — design your AI Sensy template with 4 vars.
+
+const REPEAT_ALERT_MS = 24 * 60 * 60_000; // re-alert once a day while an incident continues
 
 type Row = {
   id: string;
@@ -15,6 +18,7 @@ type Row = {
   status: string;
   down_since: string | null;
   alerted: boolean;
+  last_alerted_at: string | null;
   alert_name: string | null;
   alert_phone: string | null;
   client_name: string | null;
@@ -25,7 +29,7 @@ type Row = {
 // The client columns are joined in flat rather than nested, so there is no
 // array-or-object ambiguity to unpick at the call site.
 const rowsFor = (table: 'vms' | 'apps') => `
-  select t.id, t.name, t.status, t.down_since, t.alerted, t.alert_name, t.alert_phone,
+  select t.id, t.name, t.status, t.down_since, t.alerted, t.last_alerted_at, t.alert_name, t.alert_phone,
          c.name       as client_name,
          c.alert_name as client_alert_name,
          c.alert_phone as client_alert_phone
@@ -54,15 +58,21 @@ export async function runAlerts() {
           await updateById(table, t.id, { down_since: new Date().toISOString() });
           continue;
         }
-        if (t.alerted) continue;
         const downMs = now - new Date(t.down_since).getTime();
-        if (downMs < thresholdMs) continue;
+        if (t.alerted) {
+          // Already alerted once — only re-alert after REPEAT_ALERT_MS of
+          // continued downtime, so an ongoing incident isn't silent for days.
+          const sinceLastMs = t.last_alerted_at ? now - new Date(t.last_alerted_at).getTime() : Infinity;
+          if (sinceLastMs < REPEAT_ALERT_MS) continue;
+        } else if (downMs < thresholdMs) {
+          continue;
+        }
         if (!phone) continue; // no contact set — leave un-alerted so it fires once a number is added
 
         const minutes = Math.round(downMs / 60_000);
         try {
           await sendAisensy(cfg, { destination: phone, userName: who, templateParams: [t.name, clientName, 'DOWN', String(minutes)] });
-          await updateById(table, t.id, { alerted: true });
+          await updateById(table, t.id, { alerted: true, last_alerted_at: new Date().toISOString() });
         } catch (e) {
           console.error('[alerts] send failed:', e instanceof Error ? e.message : e);
         }
@@ -83,7 +93,7 @@ export async function runAlerts() {
               console.error('[alerts] recovery send failed:', e instanceof Error ? e.message : e);
             }
           }
-          await updateById(table, t.id, { down_since: null, alerted: false });
+          await updateById(table, t.id, { down_since: null, alerted: false, last_alerted_at: null });
         } else if (t.down_since) {
           await updateById(table, t.id, { down_since: null });
         }
