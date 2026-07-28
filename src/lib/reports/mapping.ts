@@ -66,7 +66,11 @@ export const FIELD_SPECS: Record<InputRole, FieldSpec[]> = {
     { field: 'email', label: 'Email', required: false, synonyms: EMAIL },
     { field: 'product', label: 'Product / course', required: false, synonyms: ['product', 'course', 'mango name', 'item', 'plan', 'offer', 'product name', 'course name'] },
     { field: 'amount', label: 'Amount', required: false, synonyms: ['amount', 'amount (inr)', 'total', 'price', 'order value', 'net amount', 'paid amount', 'revenue', 'grand total'] },
-    { field: 'order_time', label: 'Order time', required: true, synonyms: ['order date', 'order time', 'purchase date', 'created at', 'date', 'paid at', 'transaction date', 'timestamp'] },
+    // Not required: attribute() in facts.ts already handles a sales file with
+    // no order-time column by matching the person to their first call/session
+    // record instead of applying an attribution-window date check — the
+    // quality panel notes it, but the upload isn't blocked on it.
+    { field: 'order_time', label: 'Order time', required: false, synonyms: ['order date', 'order time', 'purchase date', 'created at', 'date', 'paid at', 'transaction date', 'timestamp'] },
     { field: 'order_id', label: 'Order id', required: false, synonyms: ['order id', 'order no', 'transaction id', 'invoice', 'payment id', 'id'] },
     { field: 'status', label: 'Order status', required: false, synonyms: ['order status', 'status', 'payment status', 'state'] },
     {
