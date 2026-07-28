@@ -1,7 +1,7 @@
 import { insertOne } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
 import { loadTemplates } from '@/lib/reports/store';
-import { checkTemplate } from '@/lib/reports/templates';
+import { checkTemplate, visibleTemplates } from '@/lib/reports/templates';
 import type { BlockId, InputRole, LensId } from '@/lib/reports/types';
 
 export const runtime = 'nodejs';
@@ -17,7 +17,7 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const clientId = url.searchParams.get('client_id');
     const roles = (url.searchParams.get('roles') ?? '').split(',').filter(Boolean) as InputRole[];
-    const templates = await loadTemplates(clientId);
+    const templates = visibleTemplates(await loadTemplates(clientId));
     return ok(templates.map((t) => ({ ...t, validity: checkTemplate(t, roles) })));
   });
 }

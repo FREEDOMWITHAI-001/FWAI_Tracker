@@ -18,8 +18,8 @@ export const BUILTIN_TEMPLATES: ReportTemplate[] = [
       'The standard AI-calling performance report. Headline uses the time-based AI-weeks lens because it carries the least selection bias.',
     lenses: ['L3', 'L1', 'L6', 'L5'],
     blocks: ['scorecard', 'funnel', 'per_webinar', 'who_bought', 'roi'],
-    requires: ['leads', 'calls', 'attendance'],
-    optional_roles: ['sales', 'cost'],
+    requires: ['calls', 'attendance'],
+    optional_roles: ['leads', 'sales', 'cost'],
     primary_lens: 'L3',
     is_builtin: true,
     sort_order: 10,
@@ -32,8 +32,8 @@ export const BUILTIN_TEMPLATES: ReportTemplate[] = [
     description: 'Compares the AI dialer against the human calling team. Needs at least one call log marked manual.',
     lenses: ['L4', 'L3', 'L1'],
     blocks: ['scorecard', 'funnel', 'per_webinar', 'who_bought', 'roi'],
-    requires: ['leads', 'calls', 'attendance'],
-    optional_roles: ['sales', 'cost'],
+    requires: ['calls', 'attendance'],
+    optional_roles: ['leads', 'sales', 'cost'],
     primary_lens: 'L4',
     is_builtin: true,
     sort_order: 20,
@@ -95,6 +95,21 @@ export const BUILTIN_TEMPLATES: ReportTemplate[] = [
     sort_order: 60,
   },
 ];
+
+// Everything the client actually asks for lives under "AI calling" as a
+// whole — the called/not-called split is now part of the funnel block
+// (see buildFunnel in engine.ts) and the per-bot breakdown (lens L5) is
+// force-included in every report — so these are no longer offered as
+// separate report types when creating a new report. Left in the DB/engine
+// (not deleted) so a report already using one of these keys keeps working.
+export const HIDDEN_TEMPLATE_KEYS = ['called_vs_not', 'per_bot', 'leave_comeback', 'full_audit'] as const;
+
+// Templates shown when picking a report type. `keepKey` (a report's current
+// template_key) is exempted so an existing report on a hidden template still
+// shows correctly in its own switcher instead of disappearing.
+export function visibleTemplates(templates: ReportTemplate[], keepKey?: string | null): ReportTemplate[] {
+  return templates.filter((t) => t.key === keepKey || !HIDDEN_TEMPLATE_KEYS.includes(t.key as any));
+}
 
 // Coerce a DB row (loose text[] columns) into a typed template.
 export function normaliseTemplate(row: any): ReportTemplate {

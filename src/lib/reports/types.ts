@@ -253,6 +253,10 @@ export interface FunnelStage {
   count: number;
   pct_of_denominator: number;
   pct_of_previous: number | null;
+  // What pct_of_previous is a percentage OF. Usually the row above, but for
+  // branch rows ("Not picked", "Not called") it's whichever stage they split
+  // off from, e.g. "Dialled" or the denominator label — not the row above.
+  pct_of_previous_label: string | null;
 }
 
 export interface PerWebinarRow {
@@ -311,6 +315,49 @@ export interface BuyersTalkedBlock {
   revenue: number; // revenue from the talked buyers
 }
 
+// Split of "who showed up / bought" by whether the person was on this
+// report's registration list at all. "Retargeted" = showed up or bought but
+// never appeared in a leads file — re-engaged some other way (WhatsApp,
+// direct link, a prior week's list). Only meaningful when a leads file is
+// present; with no leads file everyone is trivially "retargeted".
+export interface RegisteredRetargetedBlock {
+  available: boolean;
+  reason?: string;
+  attended_registered: number;
+  attended_retargeted: number;
+  bought_registered: number;
+  bought_retargeted: number;
+}
+
+// AI-calling vs manual/human-calling head-to-head, computed only when the
+// call log has rows from both channels. Complements lens L4 (which compares
+// per-dialled-lead only) with the other two bases clients ask for, plus a
+// per-webinar average so a 5-webinar manual run and a 4-webinar AI run are
+// compared fairly instead of by raw totals.
+export interface ChannelBasis {
+  label: string;
+  manual: Proportion;
+  ai: Proportion;
+  winner: 'manual' | 'ai' | 'tie';
+  rel_diff: number | null; // (ai.rate - manual.rate) / manual.rate
+}
+
+export interface ChannelPerWebinarStat {
+  webinars: number;
+  calls_avg: number;
+  buyers_avg: number;
+  buy_rate_avg: number;
+}
+
+export interface AiVsManualBlock {
+  available: boolean;
+  reason?: string;
+  calls_made: { manual: number; ai: number };
+  relative: ChannelBasis[];
+  per_webinar: { manual: ChannelPerWebinarStat; ai: ChannelPerWebinarStat };
+  notes: string[];
+}
+
 export interface RoiBlock {
   available: boolean;
   reason?: string;
@@ -366,6 +413,8 @@ export interface ReportResult {
   // Buyers who held an actual conversation, not just a pickup. Its own block
   // because "did the call work" and "did they buy" are different questions.
   buyers_talked: BuyersTalkedBlock;
+  registered_vs_retargeted: RegisteredRetargetedBlock;
+  ai_vs_manual: AiVsManualBlock;
   roi: RoiBlock;
   lenses: LensResult[];
   sessions: SessionInfo[];

@@ -59,6 +59,7 @@ export async function renderWorkbook(
   // reports gets asked in the review call.
   if (result.buyers_talked?.available) sheetBuyersTalked(wb, result);
   if (blocks.has('roi') && result.roi.available) sheetRoi(wb, result);
+  if (result.ai_vs_manual.available) sheetAiVsManual(wb, result);
   sheetQuality(wb, quality, result);
   sheetDefinitions(wb, result);
 
@@ -68,7 +69,14 @@ export async function renderWorkbook(
 
 // --- small helpers ---------------------------------------------------------
 
-function titleRow(ws: ExcelJS.Worksheet, text: string, span: number, sub?: string) {
+// `sub` is the prominent line right under the title (row 2) — on the
+// Scorecard sheet this is the period label, e.g. "Webinar Sun 19 Jul 2026,
+// 11:00 AM · 2,492 registered leads (12 Jul 11am – 19 Jul 11am)", matching
+// the client-facing format the team already hand-writes. `sub2` is an
+// optional smaller footnote (row 3, previously blank on every sheet) for
+// provenance — template name, generation timestamp, dedup mode — that
+// clients don't need front and center but still belongs in the file.
+function titleRow(ws: ExcelJS.Worksheet, text: string, span: number, sub?: string, sub2?: string) {
   ws.mergeCells(1, 1, 1, span);
   const t = ws.getCell(1, 1);
   t.value = text;
@@ -79,6 +87,12 @@ function titleRow(ws: ExcelJS.Worksheet, text: string, span: number, sub?: strin
     const s = ws.getCell(2, 1);
     s.value = sub;
     s.font = { italic: true, size: 10, color: { argb: 'FF555555' } };
+  }
+  if (sub2) {
+    ws.mergeCells(3, 1, 3, span);
+    const s2 = ws.getCell(3, 1);
+    s2.value = sub2;
+    s2.font = { italic: true, size: 8.5, color: { argb: 'FF999999' } };
   }
 }
 
@@ -155,7 +169,8 @@ function sheetScorecard(wb: ExcelJS.Workbook, r: ReportResult, meta: WorkbookMet
     ws,
     `${meta.client_name} — ${meta.report_name}`,
     span,
-    `${r.template_name}${r.period_label ? ` · ${r.period_label}` : ''} · generated ${istClock(r.generated_at) ?? '—'} IST · ` +
+    r.period_label ?? r.template_name,
+    `${r.template_name} · generated ${istClock(r.generated_at) ?? '—'} IST · ` +
       `counts are ${r.scorecard.dedup_mode === 'unique_member' ? 'PER UNIQUE MEMBER' : 'PER RAW ROW'}`
   );
 
@@ -193,21 +208,46 @@ function sheetScorecard(wb: ExcelJS.Workbook, r: ReportResult, meta: WorkbookMet
     62
   );
 
+  const rr = r.registered_vs_retargeted;
+  if (rr.available) {
+    row++;
+    row = sectionBar(ws, row, '5.  Registered vs Retargeted', span);
+    row = headerRow(ws, row, ['', 'Registered', 'Retargeted*', 'Total', '']);
+    const totalAttended = rr.attended_registered + rr.attended_retargeted;
+    const totalBought = rr.bought_registered + rr.bought_retargeted;
+    row = dataRow(ws, row, ['Attended the webinar', rr.attended_registered, rr.attended_retargeted, totalAttended, ''], {
+      formats: { 2: MONEY, 3: MONEY, 4: MONEY },
+    });
+    row = dataRow(ws, row, ['Bought', rr.bought_registered, rr.bought_retargeted, totalBought, ''], {
+      fillArgb: TOTAL,
+      bold: true,
+      formats: { 2: MONEY, 3: MONEY, 4: MONEY },
+    });
+    row = noteRow(
+      ws,
+      row,
+      '*Retargeted = attended or bought but never appeared in a leads/registrations file — reached some other way ' +
+        '(a prior week\'s list, a direct link, WhatsApp, etc.), not on this report\'s registration list.',
+      span,
+      30
+    );
+  }
+
   widths(ws, [34, 26, 46, 30, 12]);
 }
 
 function sheetFunnel(wb: ExcelJS.Workbook, r: ReportResult) {
   const ws = wb.addWorksheet('Funnel', { views: [{ showGridLines: false }] });
   titleRow(ws, 'Funnel', 4, `Denominator locked at ${r.scorecard.denominator.toLocaleString()} (${r.scorecard.denominator_label}).`);
-  let row = headerRow(ws, 4, ['Stage', 'Count', '% of population', '% of previous stage']);
+  let row = headerRow(ws, 4, ['Stage', 'Count', '% of population', '% of basis', 'Basis']);
   r.funnel.forEach((f, i) => {
-    row = dataRow(ws, row, [f.stage, f.count, f.pct_of_denominator, f.pct_of_previous], {
+    row = dataRow(ws, row, [f.stage, f.count, f.pct_of_denominator, f.pct_of_previous, f.pct_of_previous_label ?? '—'], {
       fillArgb: i === 0 ? SUB : i === r.funnel.length - 1 ? TOTAL : undefined,
       bold: i === 0 || i === r.funnel.length - 1,
       formats: { 2: MONEY, 3: PCT, 4: PCT },
     });
   });
-  widths(ws, [34, 14, 18, 20]);
+  widths(ws, [34, 14, 18, 16, 20]);
   ws.views = [{ state: 'frozen', ySplit: 4, showGridLines: false }];
 }
 
@@ -320,7 +360,7 @@ function sheetWhoBought(wb: ExcelJS.Workbook, r: ReportResult) {
     'Unattributed buyers are listed too — a report that hides them will disagree with the client’s own sales sheet.'
   );
   let row = headerRow(ws, 4, [
-    'Name', 'Phone', 'Email', 'Session', 'Session date', 'Dialled', 'Connected', 'Talk turns', 'Bot(s)', 'Showed', 'Came back', 'Order value', 'Coupon', 'Order time',
+    'Name', 'Phone', 'Email', 'Session', 'Session date', 'Dialled', 'Connected', 'Call mode', 'Talk turns', 'Bot(s)', 'Showed', 'Came back', 'Order value', 'Coupon', 'Order time',
   ]);
   for (const b of r.who_bought) {
     row = dataRow(
@@ -328,15 +368,16 @@ function sheetWhoBought(wb: ExcelJS.Workbook, r: ReportResult) {
       row,
       [
         b.name ?? '—', b.phone ?? '—', b.email ?? '—', b.within_window ? b.session_key : 'UNATTRIBUTED',
-        b.session_date ?? '—', b.dialled ? 'yes' : 'no', b.connected ? 'yes' : 'no', b.talk_turns ?? '—',
+        b.session_date ?? '—', b.dialled ? 'yes' : 'no', b.connected ? 'yes' : 'no',
+        b.call_mode ?? '—', b.talk_turns ?? '—',
         b.bots?.length ? b.bots.join(', ') : (b.bot_id ?? '—'),
         b.showed_up ? 'yes' : 'no', b.came_back ? 'yes' : 'no', b.order_value, b.coupon ?? '—',
         b.order_time ? istClock(b.order_time) : '—',
       ],
-      { fillArgb: b.within_window ? undefined : RED, formats: { 12: MONEY } }
+      { fillArgb: b.within_window ? undefined : RED, formats: { 13: MONEY } }
     );
   }
-  widths(ws, [26, 14, 30, 22, 13, 9, 11, 11, 20, 9, 11, 13, 16, 18]);
+  widths(ws, [26, 14, 30, 22, 13, 9, 11, 10, 11, 20, 9, 11, 13, 16, 18]);
   ws.views = [{ state: 'frozen', ySplit: 4, showGridLines: false }];
 }
 
@@ -394,6 +435,72 @@ function sheetBuyersTalked(wb: ExcelJS.Workbook, r: ReportResult) {
     );
   }
   widths(ws, [26, 14, 30, 13, 11, 13, 22, 9, 13, 16, 18]);
+}
+
+function sheetAiVsManual(wb: ExcelJS.Workbook, r: ReportResult) {
+  const b = r.ai_vs_manual;
+  const ws = wb.addWorksheet('AI vs Manual', { views: [{ showGridLines: false }] });
+  titleRow(
+    ws,
+    'AI calling vs Manual calling',
+    5,
+    `Calls made — Manual ${b.calls_made.manual.toLocaleString()}, AI ${b.calls_made.ai.toLocaleString()}.`
+  );
+
+  let row = 4;
+  row = sectionBar(ws, row, 'Relative — buy rate by basis', 5);
+  row = headerRow(ws, row, ['Basis', 'Manual', 'AI', 'AI vs Manual', 'Winner']);
+  for (const g of b.relative) {
+    row = dataRow(
+      ws,
+      row,
+      [
+        g.label,
+        g.manual.rate,
+        g.ai.rate,
+        g.rel_diff == null ? 'n/a' : `${g.rel_diff >= 0 ? '+' : ''}${(g.rel_diff * 100).toFixed(1)}%`,
+        g.winner === 'tie' ? 'TIE' : g.winner.toUpperCase(),
+      ],
+      { fillArgb: g.winner === 'ai' ? GREEN : g.winner === 'manual' ? AMBER : undefined, formats: { 2: PCT2, 3: PCT2 } }
+    );
+  }
+  for (const g of b.relative) {
+    row = noteRow(
+      ws,
+      row,
+      `${g.label}: Manual ${(g.manual.rate * 100).toFixed(2)}% (${g.manual.k}/${g.manual.n}) vs ` +
+        `AI ${(g.ai.rate * 100).toFixed(2)}% (${g.ai.k}/${g.ai.n}).`,
+      5,
+      18
+    );
+  }
+  row++;
+
+  row = sectionBar(ws, row, 'Per-webinar (fair comparison — different webinar counts each side)', 5);
+  row = headerRow(ws, row, ['', 'Manual', 'AI', '', '']);
+  row = dataRow(ws, row, ['Webinars', b.per_webinar.manual.webinars, b.per_webinar.ai.webinars, '', '']);
+  row = dataRow(
+    ws,
+    row,
+    ['Calls made (avg)', b.per_webinar.manual.calls_avg, b.per_webinar.ai.calls_avg, '', ''],
+    { formats: { 2: '#,##0.0', 3: '#,##0.0' } }
+  );
+  row = dataRow(
+    ws,
+    row,
+    ['Buyers (avg)', b.per_webinar.manual.buyers_avg, b.per_webinar.ai.buyers_avg, '', ''],
+    { formats: { 2: '#,##0.0', 3: '#,##0.0' } }
+  );
+  row = dataRow(
+    ws,
+    row,
+    ['Buy rate per dialled lead (avg)', b.per_webinar.manual.buy_rate_avg, b.per_webinar.ai.buy_rate_avg, '', ''],
+    { formats: { 2: PCT2, 3: PCT2 } }
+  );
+  row++;
+
+  for (const n of b.notes) row = noteRow(ws, row, n, 5, 30);
+  widths(ws, [38, 16, 16, 16, 12]);
 }
 
 function sheetRoi(wb: ExcelJS.Workbook, r: ReportResult) {

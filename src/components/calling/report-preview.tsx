@@ -38,6 +38,8 @@ export function ReportPreview({ result }: { result: ReportResult }) {
       <Lenses result={result} />
       {blocks.has('per_webinar') && <PerWebinar result={result} />}
       {blocks.has('roi') && result.roi.available && <Roi result={result} />}
+      {result.ai_vs_manual.available && <AiVsManual result={result} />}
+      {result.registered_vs_retargeted.available && <RegisteredRetargeted result={result} />}
       {blocks.has('who_bought') && <WhoBought result={result} />}
     </>
   );
@@ -106,7 +108,7 @@ function Funnel({ result }: { result: ReportResult }) {
               <span className="nm">{f.stage}</span>
               <span className="pc">
                 {f.count.toLocaleString()} · {pct(f.pct_of_denominator)}
-                {f.pct_of_previous != null && ` · ${pct(f.pct_of_previous)} of previous`}
+                {f.pct_of_previous != null && ` · ${pct(f.pct_of_previous)} of ${f.pct_of_previous_label}`}
               </span>
             </div>
             <div className="track">
@@ -355,6 +357,138 @@ function Roi({ result }: { result: ReportResult }) {
   );
 }
 
+function RegisteredRetargeted({ result }: { result: ReportResult }) {
+  const b = result.registered_vs_retargeted;
+  const totalAttended = b.attended_registered + b.attended_retargeted;
+  const totalBought = b.bought_registered + b.bought_retargeted;
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-h">
+        <h3>Registered vs Retargeted</h3>
+        <span className="updated">who was on this report&apos;s registration list, and who wasn&apos;t</span>
+      </div>
+      <div className="tbl-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Registered</th>
+              <th>Retargeted*</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="client">Attended the webinar</td>
+              <td className="resp">{b.attended_registered.toLocaleString()}</td>
+              <td className="resp">{b.attended_retargeted.toLocaleString()}</td>
+              <td className="resp">{totalAttended.toLocaleString()}</td>
+            </tr>
+            <tr>
+              <td className="client">Bought</td>
+              <td className="resp">{b.bought_registered.toLocaleString()}</td>
+              <td className="resp">{b.bought_retargeted.toLocaleString()}</td>
+              <td className="resp">{totalBought.toLocaleString()}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div className="card-b" style={{ borderTop: '1px solid var(--border-2)' }}>
+        <div className="sub" style={{ color: 'var(--muted)', fontSize: 12.5 }}>
+          *Retargeted = attended or bought but never appeared in a leads/registrations file — reached some other way
+          (a prior week&apos;s list, a direct link, WhatsApp, etc.), not on this report&apos;s registration list.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AiVsManual({ result }: { result: ReportResult }) {
+  const b = result.ai_vs_manual;
+  const winnerColor = (w: 'manual' | 'ai' | 'tie') => (w === 'tie' ? 'var(--muted)' : w === 'ai' ? 'var(--green)' : 'var(--amber)');
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-h">
+        <h3>AI calling vs Manual calling</h3>
+        <span className="updated">
+          calls made — Manual {b.calls_made.manual.toLocaleString()}, AI {b.calls_made.ai.toLocaleString()}
+        </span>
+      </div>
+      <div className="tbl-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Basis</th>
+              <th>Manual</th>
+              <th>AI</th>
+              <th>AI vs Manual</th>
+              <th>Winner</th>
+            </tr>
+          </thead>
+          <tbody>
+            {b.relative.map((g) => (
+              <tr key={g.label}>
+                <td>{g.label}</td>
+                <td className="resp">
+                  {pct(g.manual.rate, 2)} ({g.manual.k}/{g.manual.n})
+                </td>
+                <td className="resp">
+                  {pct(g.ai.rate, 2)} ({g.ai.k}/{g.ai.n})
+                </td>
+                <td className="resp">{delta(g.rel_diff)}</td>
+                <td className="resp" style={{ color: winnerColor(g.winner), fontWeight: 600 }}>
+                  {g.winner === 'tie' ? 'TIE' : g.winner.toUpperCase()}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="card-b">
+        <div className="sub" style={{ fontWeight: 600, marginBottom: 8 }}>
+          Per-webinar (fair comparison — different webinar counts each side)
+        </div>
+        <table className="data">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Manual</th>
+              <th>AI</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Webinars</td>
+              <td className="resp">{b.per_webinar.manual.webinars}</td>
+              <td className="resp">{b.per_webinar.ai.webinars}</td>
+            </tr>
+            <tr>
+              <td>Calls made (avg)</td>
+              <td className="resp">{b.per_webinar.manual.calls_avg.toFixed(1)}</td>
+              <td className="resp">{b.per_webinar.ai.calls_avg.toFixed(1)}</td>
+            </tr>
+            <tr>
+              <td>Buyers (avg)</td>
+              <td className="resp">{b.per_webinar.manual.buyers_avg.toFixed(1)}</td>
+              <td className="resp">{b.per_webinar.ai.buyers_avg.toFixed(1)}</td>
+            </tr>
+            <tr>
+              <td>Buy rate per dialled lead (avg)</td>
+              <td className="resp">{pct(b.per_webinar.manual.buy_rate_avg, 2)}</td>
+              <td className="resp">{pct(b.per_webinar.ai.buy_rate_avg, 2)}</td>
+            </tr>
+          </tbody>
+        </table>
+        {b.notes.map((n, i) => (
+          <div key={i} className="sub" style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 8 }}>
+            {n}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Tile({ label, value, detail }: { label: string; value: string; detail: string }) {
   return (
     <div className="stat">
@@ -390,6 +524,7 @@ function WhoBought({ result }: { result: ReportResult }) {
               <th>Email</th>
               <th>Session</th>
               <th>Dialled</th>
+              <th>Call mode</th>
               <th>Bot</th>
               <th>Showed</th>
               <th>Value</th>
@@ -404,6 +539,7 @@ function WhoBought({ result }: { result: ReportResult }) {
                 <td className="sub">{b.email ?? '—'}</td>
                 <td className="sub">{b.within_window ? b.session_date ?? b.session_key : 'unattributed'}</td>
                 <td className="sub">{b.dialled ? (b.connected ? 'connected' : 'dialled') : 'no'}</td>
+                <td className="sub">{b.call_mode ?? '—'}</td>
                 <td className="sub">{b.bot_id ?? '—'}</td>
                 <td className="sub">{b.showed_up ? 'yes' : 'no'}</td>
                 <td className="resp">{money(b.order_value)}</td>
@@ -412,7 +548,7 @@ function WhoBought({ result }: { result: ReportResult }) {
             ))}
             {!rows.length && (
               <tr>
-                <td colSpan={9} style={{ color: 'var(--faint)', padding: 20 }}>
+                <td colSpan={10} style={{ color: 'var(--faint)', padding: 20 }}>
                   No orders were supplied, or none could be matched.
                 </td>
               </tr>

@@ -1,7 +1,7 @@
 import { deleteById, jsonb, maybeOne, sql, updateById } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
 import { loadTemplates } from '@/lib/reports/store';
-import { checkTemplate } from '@/lib/reports/templates';
+import { checkTemplate, visibleTemplates } from '@/lib/reports/templates';
 import type { InputRole } from '@/lib/reports/types';
 
 export const runtime = 'nodejs';
@@ -33,7 +33,7 @@ export async function GET(_req: Request, { params }: Ctx) {
     );
 
     const roles = [...new Set(datasets.map((d: any) => d.role))] as InputRole[];
-    const templates = (await loadTemplates(report.client_id)).map((t) => ({
+    const templates = visibleTemplates(await loadTemplates(report.client_id), report.template_key).map((t) => ({
       ...t,
       validity: checkTemplate(t, roles),
     }));

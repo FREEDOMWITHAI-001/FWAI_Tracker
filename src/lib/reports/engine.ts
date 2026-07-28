@@ -12,14 +12,19 @@ import { buildQuality } from './quality';
 import { buildRoi } from './roi';
 import { runLenses } from './lenses';
 import { Exclusions, type ExclusionRow } from './identity';
+import { proportion, relativeLift } from './stats';
 import type {
+  AiVsManualBlock,
   Assumptions,
   BuyerRow,
+  ChannelBasis,
+  ChannelPerWebinarStat,
   Fact,
   FunnelStage,
   LensResult,
   PerWebinarRow,
   QualityPanel,
+  RegisteredRetargetedBlock,
   ReportResult,
   ReportTemplate,
   Scorecard,
@@ -69,6 +74,8 @@ export function runReport(input: RunInput): RunOutput {
   const perWebinar = buildPerWebinar(build.facts, build.sessions);
   const whoBought = buildWhoBought(build);
   const buyersTalked = buildBuyersTalked(whoBought, build, a);
+  const registeredVsRetargeted = buildRegisteredVsRetargeted(analysis);
+  const aiVsManual = buildAiVsManual(analysis, perWebinar, input.datasets);
   const scorecard = buildScorecard(analysis, lenses, roi, template, a, denominator, denominatorLabel);
 
   const result: ReportResult = {
@@ -82,6 +89,8 @@ export function runReport(input: RunInput): RunOutput {
     per_webinar: perWebinar,
     who_bought: whoBought,
     buyers_talked: buyersTalked,
+    registered_vs_retargeted: registeredVsRetargeted,
+    ai_vs_manual: aiVsManual,
     roi,
     lenses,
     sessions: build.sessions,
@@ -95,19 +104,33 @@ export function runReport(input: RunInput): RunOutput {
 // --- funnel ----------------------------------------------------------------
 
 function buildFunnel(facts: Fact[], denominator: number, label: string): FunnelStage[] {
-  const stages: { stage: string; count: number }[] = [
-    { stage: label, count: denominator },
-    { stage: 'Dialled', count: facts.filter((f) => f.dialled).length },
-    { stage: 'Connected', count: facts.filter((f) => f.connected).length },
-    { stage: 'Showed up', count: facts.filter((f) => f.showed_up).length },
-    { stage: 'Bought', count: facts.filter((f) => f.bought).length },
+  const dialled = facts.filter((f) => f.dialled).length;
+  const connected = facts.filter((f) => f.connected).length;
+  const showed = facts.filter((f) => f.showed_up).length;
+  const bought = facts.filter((f) => f.bought).length;
+  // "Not picked" and "Not called" are complements of Dialled/Connected, not
+  // further drops in the main line — each is shown as a % of the stage it
+  // splits off from (Dialled, denominator) rather than of the row above it.
+  const notPicked = dialled - connected;
+  const notCalled = denominator - dialled;
+
+  const stage = (s: string, count: number, prevCount: number | null, basisLabel: string | null): FunnelStage => ({
+    stage: s,
+    count,
+    pct_of_denominator: denominator ? count / denominator : 0,
+    pct_of_previous: prevCount == null ? null : prevCount ? count / prevCount : null,
+    pct_of_previous_label: prevCount == null ? null : basisLabel,
+  });
+
+  return [
+    stage(label, denominator, null, null),
+    stage('Dialled', dialled, denominator, label),
+    stage('Connected', connected, dialled, 'Dialled'),
+    stage('Not picked', notPicked, dialled, 'Dialled'),
+    stage('Not called', notCalled, denominator, label),
+    stage('Showed up', showed, connected, 'Connected'),
+    stage('Bought', bought, showed, 'Showed up'),
   ];
-  return stages.map((s, i) => ({
-    stage: s.stage,
-    count: s.count,
-    pct_of_denominator: denominator ? s.count / denominator : 0,
-    pct_of_previous: i === 0 ? null : stages[i - 1].count ? s.count / stages[i - 1].count : null,
-  }));
 }
 
 // --- per-webinar -----------------------------------------------------------
@@ -268,6 +291,154 @@ function buildBuyersTalked(
     total_buyers: total,
     share_of_buyers: total ? buyers.length / total : 0,
     revenue,
+  };
+}
+
+// --- registered vs retargeted -----------------------------------------------
+
+function buildRegisteredVsRetargeted(facts: Fact[]): RegisteredRetargetedBlock {
+  const registered = facts.filter((f) => f.registered);
+  const retargeted = facts.filter((f) => !f.registered && (f.showed_up || f.bought));
+
+  if (!registered.length) {
+    return {
+      available: false,
+      reason: 'No leads/registrations file is present, so nobody can be marked "registered".',
+      attended_registered: 0,
+      attended_retargeted: 0,
+      bought_registered: 0,
+      bought_retargeted: 0,
+    };
+  }
+  if (!retargeted.length) {
+    return {
+      available: false,
+      reason: 'Every attendee/buyer was on the registration list — nobody attended or bought without registering.',
+      attended_registered: registered.filter((f) => f.showed_up).length,
+      attended_retargeted: 0,
+      bought_registered: registered.filter((f) => f.bought).length,
+      bought_retargeted: 0,
+    };
+  }
+  return {
+    available: true,
+    attended_registered: registered.filter((f) => f.showed_up).length,
+    attended_retargeted: retargeted.filter((f) => f.showed_up).length,
+    bought_registered: registered.filter((f) => f.bought).length,
+    bought_retargeted: retargeted.filter((f) => f.bought).length,
+  };
+}
+
+// --- AI vs manual head-to-head -----------------------------------------------
+//
+// Complements lens L4 (per-dialled-lead only) with the other two bases a
+// client asks for, plus a per-webinar average so a 5-webinar manual run and
+// a 4-webinar AI run are compared fairly instead of by raw totals. A session
+// is attributed to whichever channel dialled more people for it.
+
+function emptyChannelStat(): ChannelPerWebinarStat {
+  return { webinars: 0, calls_avg: 0, buyers_avg: 0, buy_rate_avg: 0 };
+}
+
+function channelBasis(label: string, manualK: number, manualN: number, aiK: number, aiN: number): ChannelBasis {
+  const manual = proportion('Manual', manualK, manualN);
+  const ai = proportion('AI', aiK, aiN);
+  const rel_diff = relativeLift(ai.rate, manual.rate);
+  const winner: ChannelBasis['winner'] = manual.rate === ai.rate ? 'tie' : ai.rate > manual.rate ? 'ai' : 'manual';
+  return { label, manual, ai, winner, rel_diff };
+}
+
+function buildAiVsManual(facts: Fact[], perWebinar: PerWebinarRow[], datasets: LoadedDataset[]): AiVsManualBlock {
+  const callDatasets = datasets.filter((d) => d.role === 'calls');
+  const rawCalls: { manual: number; ai: number } = { manual: 0, ai: 0 };
+  for (const ds of callDatasets) {
+    const mode = ds.options?.call_mode === 'manual' ? 'manual' : 'ai';
+    rawCalls[mode] += ds.rows.length;
+  }
+  const hasManual = callDatasets.some((d) => d.options?.call_mode === 'manual');
+  const hasAi = callDatasets.some((d) => d.options?.call_mode !== 'manual');
+
+  if (!hasManual || !hasAi) {
+    return {
+      available: false,
+      reason: 'Needs at least one call log marked AI and one marked manual.',
+      calls_made: rawCalls,
+      relative: [],
+      per_webinar: { manual: emptyChannelStat(), ai: emptyChannelStat() },
+      notes: [],
+    };
+  }
+
+  const dialledAi = facts.filter((f) => f.call_mode === 'ai');
+  const dialledManual = facts.filter((f) => f.call_mode === 'manual');
+  const talkedAi = dialledAi.filter((f) => f.talked);
+  const talkedManual = dialledManual.filter((f) => f.talked);
+
+  const relative: ChannelBasis[] = [
+    channelBasis(
+      'Buy rate per call made',
+      dialledManual.filter((f) => f.bought).length,
+      rawCalls.manual,
+      dialledAi.filter((f) => f.bought).length,
+      rawCalls.ai
+    ),
+    channelBasis(
+      'Buy rate per distinct lead (dialled)',
+      dialledManual.filter((f) => f.bought).length,
+      dialledManual.length,
+      dialledAi.filter((f) => f.bought).length,
+      dialledAi.length
+    ),
+    channelBasis(
+      'Buy rate per genuine conversation (talked)',
+      talkedManual.filter((f) => f.bought).length,
+      talkedManual.length,
+      talkedAi.filter((f) => f.bought).length,
+      talkedAi.length
+    ),
+  ];
+
+  // A session's channel = whichever side dialled more people for it. Sessions
+  // nobody dialled are excluded — they cannot be attributed either way.
+  const bySession = new Map<string, Fact[]>();
+  for (const f of facts) {
+    if (!f.dialled || !f.call_mode) continue;
+    const arr = bySession.get(f.session_key);
+    if (arr) arr.push(f);
+    else bySession.set(f.session_key, [f]);
+  }
+  const sessionChannel = new Map<string, 'ai' | 'manual'>();
+  for (const [key, fs] of bySession) {
+    const ai = fs.filter((f) => f.call_mode === 'ai').length;
+    const manual = fs.filter((f) => f.call_mode === 'manual').length;
+    sessionChannel.set(key, ai >= manual ? 'ai' : 'manual');
+  }
+
+  const perWebinarByChannel = (channel: 'ai' | 'manual'): ChannelPerWebinarStat => {
+    const rows = perWebinar.filter((w) => !w.excluded && sessionChannel.get(w.session_key) === channel);
+    if (!rows.length) return emptyChannelStat();
+    const avg = (f: (w: PerWebinarRow) => number) => rows.reduce((t, w) => t + f(w), 0) / rows.length;
+    const buyersAvg = avg((w) => w.bought);
+    const dialledAvg = avg((w) => w.dialled);
+    return {
+      webinars: rows.length,
+      calls_avg: dialledAvg,
+      buyers_avg: buyersAvg,
+      buy_rate_avg: dialledAvg ? buyersAvg / dialledAvg : 0,
+    };
+  };
+
+  return {
+    available: true,
+    calls_made: rawCalls,
+    relative,
+    per_webinar: { manual: perWebinarByChannel('manual'), ai: perWebinarByChannel('ai') },
+    notes: [
+      '"Talked" uses this report\'s own definition (talk-turns or duration threshold), applied the same way to ' +
+        'both channels — a hand-built report that used a looser proxy for one channel (e.g. any connected call) will not match this exactly.',
+      'A webinar is attributed to whichever channel dialled more people for it; webinars nobody dialled are excluded from the per-webinar averages.',
+      '"Buy rate per call made" divides by raw call-log rows (every dial attempt), not distinct people, so it is usually lower than the per-distinct-lead rate.',
+    ],
   };
 }
 
