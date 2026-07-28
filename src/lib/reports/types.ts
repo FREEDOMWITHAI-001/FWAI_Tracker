@@ -49,6 +49,11 @@ export interface Assumptions {
   attribution_requires_call: boolean; // false => not-called buyers attributed off session start
   zero_order_value: number; // notional value of a ₹0 / 100%-off coupon order
   default_order_value: number | null; // used when the sales file has no amount column
+  // Flat ₹ per sale for ROI, overriding each order's real recorded amount —
+  // "buyers × sale value" instead of summing actual amounts. Useful when the
+  // sales file's real amounts are messy/partial/absent. Leave null to keep
+  // using real order values (the default).
+  sale_value: number | null;
   engaged_min_turns: number; // talk turns that count as "engaged"
   connected_statuses: string[]; // call statuses that count as connected
   showed_up_min_minutes: number; // watch minutes needed to count as showed up
@@ -109,6 +114,7 @@ export const DEFAULT_ASSUMPTIONS: Assumptions = {
   attribution_requires_call: false,
   zero_order_value: 0,
   default_order_value: null,
+  sale_value: null,
   engaged_min_turns: 2,
   connected_statuses: ['completed', 'answered', 'connected', 'success', 'successful'],
   showed_up_min_minutes: 1,

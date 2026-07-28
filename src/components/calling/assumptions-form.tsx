@@ -226,6 +226,18 @@ export function AssumptionsForm({
             <input className="input" type="number" value={value.fixed_cost} onChange={(e) => num('fixed_cost', e.target.value)} />
           </Field>
         </div>
+        <Field
+          label="Flat sale value (₹, optional)"
+          hint="Overrides real order amounts for ROI — revenue becomes buyers × this fixed price. Leave blank to use each order's actual amount."
+        >
+          <input
+            className="input"
+            type="number"
+            value={value.sale_value ?? ''}
+            onChange={(e) => num('sale_value', e.target.value, true)}
+            placeholder="e.g. 350000"
+          />
+        </Field>
       </Section>
     </>
   );

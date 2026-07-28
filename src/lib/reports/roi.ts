@@ -35,11 +35,15 @@ export function buildRoi(
   const total = callCost + telephony + a.fixed_cost;
 
   const dialledBuyers = facts.filter((f) => f.dialled && f.bought);
-  const attributed = dialledBuyers.reduce((s, f) => s + (f.order_value ?? 0), 0);
+  // A flat sale value, when set, overrides real recorded amounts everywhere
+  // in this block — "buyers × sale value" instead of summing actual orders.
+  // Useful when the sales file's real amounts are messy, partial, or absent.
+  const attributed =
+    a.sale_value != null ? dialledBuyers.length * a.sale_value : dialledBuyers.reduce((s, f) => s + (f.order_value ?? 0), 0);
   const avgOrder =
-    dialledBuyers.length > 0
-      ? attributed / dialledBuyers.length
-      : a.default_order_value ?? averageOrderValue(facts);
+    a.sale_value ??
+    (dialledBuyers.length > 0 ? attributed / dialledBuyers.length : a.default_order_value ?? averageOrderValue(facts));
+  if (a.sale_value != null) notes.push(`Revenue uses a flat ₹${a.sale_value.toLocaleString()} per sale, not each order's real amount.`);
 
   if (total <= 0) {
     return {
