@@ -68,11 +68,17 @@ export function buildRoi(
   }
 
   // Pick the lens the incremental figure rides on: the report's primary lens if
-  // it is credible and available, else the best available causal lens.
+  // it is credible and available, else the best available causal lens. Per the
+  // SOP (28-Jul review): when NO causal lens exists, still compute the
+  // incremental figure from the best available comparison (reached vs
+  // not-reached) and label it DIRECTIONAL — a labelled directional lift
+  // over-credits far less than showing only the gross number.
   const usable = lenses.filter((l) => l.available && l.outcomes.some((o) => o.metric === 'bought'));
   const chosen =
     usable.find((l) => l.id === primaryLens && l.credibility === 'causal') ??
     usable.find((l) => CAUSAL_LENSES.includes(l.id)) ??
+    usable.find((l) => l.id === primaryLens) ??
+    usable[0] ??
     null;
 
   let incBuyers: number | null = null;
@@ -106,6 +112,11 @@ export function buildRoi(
     if (!norm)
       notes.push(
         'No session-weighted lift was possible (it needs at least two webinars containing both cohorts), so the pooled lift was used.'
+      );
+    if (chosen.credibility !== 'causal')
+      notes.push(
+        `${chosen.id} is DIRECTIONAL — who answers the phone / who gets dialled is not random, so part of this lift is ` +
+          'selection, not the calls. Quote this ROI as directional, never as proof. Add non-AI weeks (L3) or a bot column (L5) for a causal number.'
       );
     if (!outcome.significance.significant)
       notes.push(
