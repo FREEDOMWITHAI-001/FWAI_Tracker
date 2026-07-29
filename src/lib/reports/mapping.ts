@@ -17,7 +17,7 @@ export interface FieldSpec {
   hint?: string;
 }
 
-const PHONE = ['phone', 'phone number', 'mobile', 'mobile number', 'contact number', 'contact', 'whatsapp', 'msisdn', 'number', 'to number', 'customer number'];
+const PHONE = ['phone', 'phone number', 'mobile', 'mobile number', 'contact number', 'contact', 'whatsapp', 'msisdn', 'number', 'to number', 'customer number', 'phone no', 'mobile no', 'contact no', 'customer phone', 'to phone', 'callee', 'destination number', 'recipient'];
 const EMAIL = ['email', 'email address', 'e mail', 'user email', 'attendee email', 'participant email', 'contact email', 'buyer email'];
 const NAME = ['name', 'full name', 'contact name', 'customer name', 'attendee name', 'participant name', 'user name', 'name (original name)', 'display name', 'first name', 'lead name'];
 
@@ -35,11 +35,21 @@ export const FIELD_SPECS: Record<InputRole, FieldSpec[]> = {
     { field: 'phone', label: 'Phone', required: true, synonyms: PHONE },
     { field: 'name', label: 'Name', required: false, synonyms: NAME },
     { field: 'email', label: 'Email', required: false, synonyms: EMAIL },
-    { field: 'status', label: 'Call status', required: true, synonyms: ['status', 'call status', 'disposition', 'outcome', 'result', 'call result', 'end reason'] },
-    { field: 'duration_sec', label: 'Duration', required: false, synonyms: ['duration', 'call duration', 'duration (seconds)', 'duration sec', 'talk time', 'talk duration', 'billable duration', 'duration (minutes)'] },
-    { field: 'talk_turns', label: 'Talk turns', required: false, synonyms: ['talk turns', 'turns', 'exchanges', 'user turns', 'conversation turns', 'messages', 'transcript turns'] },
-    { field: 'bot_name', label: 'Bot / agent name', required: false, synonyms: ['bot name', 'bot', 'agent', 'agent name', 'assistant', 'campaign', 'campaign name', 'flow', 'caller'] },
-    { field: 'call_time', label: 'Call time', required: true, synonyms: ['call time', 'started at', 'start time', 'created at', 'date', 'datetime', 'timestamp', 'call date', 'initiated at'] },
+    { field: 'status', label: 'Call status', required: true, synonyms: ['status', 'call status', 'disposition', 'outcome', 'result', 'call result', 'end reason', 'call outcome', 'call state', 'hangup reason', 'answered', 'connection status'] },
+    { field: 'duration_sec', label: 'Duration', required: false, synonyms: ['duration', 'call duration', 'duration (seconds)', 'duration sec', 'talk time', 'talk duration', 'billable duration', 'duration (minutes)', 'call length', 'length', 'total duration', 'conversation duration', 'duration in seconds', 'duration (s)', 'duration (sec)', 'recording duration', 'call seconds', 'seconds', 'talktime', 'handle time', 'call duration (seconds)', 'call duration (sec)'] },
+    { field: 'talk_turns', label: 'Talk turns', required: false, synonyms: ['talk turns', 'turns', 'exchanges', 'user turns', 'conversation turns', 'messages', 'transcript turns', 'turn count', 'no of turns', 'number of turns', 'total turns', 'interactions'] },
+    { field: 'bot_name', label: 'Bot / agent name', required: false, synonyms: ['bot name', 'bot', 'agent', 'agent name', 'assistant', 'campaign', 'campaign name', 'flow', 'caller', 'assistant name', 'assistant id', 'agent id', 'bot id', 'ai agent', 'voice agent', 'campaign id', 'list name'] },
+    // Not required: with no call-time column, sales attribution anchors on the
+    // webinar's start time instead of the call (attribution_requires_call is
+    // off by default) and AI-weeks come from the session dates — the quality
+    // panel notes the downgrade, but the upload isn't blocked on it.
+    {
+      field: 'call_time',
+      label: 'Call time',
+      required: false,
+      synonyms: ['call time', 'started at', 'start time', 'created at', 'date', 'datetime', 'timestamp', 'call date', 'initiated at', 'time', 'date time', 'call date time', 'call datetime', 'call started', 'call start time', 'start date', 'called at', 'dialed at', 'dialled at', 'attempted at', 'placed at', 'end time'],
+      hint: 'Without it, sale attribution anchors on the webinar time instead of the call.',
+    },
     { field: 'session_date', label: 'Webinar date', required: false, synonyms: ['webinar date', 'session date', 'event date'] },
   ],
   attendance: [
