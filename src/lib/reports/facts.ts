@@ -418,7 +418,13 @@ export function buildFacts(
       if (!ref) continue;
       const status = pick(row, ds.mapping, 'status').toLowerCase().trim();
       const reached = connectedSet.has(status);
-      const bot = pick(row, ds.mapping, 'bot_name').trim();
+      // Per-member aggregate logs pack every campaign that dialled the person
+      // into ONE cell ("Bot A | Bot B | ..."), so split on the separators
+      // dialers actually use instead of treating the cell as one bot name.
+      const rowBots = pick(row, ds.mapping, 'bot_name')
+        .split(/[|;]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
       const when = parseWhen(pick(row, ds.mapping, 'call_time'), order);
       const turnsRaw = pick(row, ds.mapping, 'talk_turns');
       const turns = turnsRaw ? parseCount(turnsRaw) : null;
@@ -426,7 +432,7 @@ export function buildFacts(
       const durRaw = parseDuration(pick(row, ds.mapping, 'duration_sec'), unit);
       if (durRaw != null) hasDuration = true;
       const seconds = durRaw == null ? 0 : unit === 'minutes' ? durRaw * 60 : durRaw;
-      if (bot) botsSeen.add(bot);
+      for (const b of rowBots) botsSeen.add(b);
 
       let c = calls.get(ref.key);
       if (!c) {
@@ -447,10 +453,10 @@ export function buildFacts(
       }
       c.attempts++;
       c.modes.add(mode);
-      if (bot) c.bots.add(bot);
+      for (const b of rowBots) c.bots.add(b);
       if (reached) {
         c.connected = true;
-        if (bot) c.reached_bots.add(bot);
+        for (const b of rowBots) c.reached_bots.add(b);
         c.seconds += seconds;
         // Longest SINGLE call, not the sum: one 20-second conversation is a
         // conversation, ten 2-second pickups are not.
@@ -830,8 +836,11 @@ function attribute(
     }
     const anchor = Date.parse(anchorIso);
     if (Number.isNaN(anchor)) continue;
+    // attribution_days = 0 disables the upper cap (SOP: the sale counts as
+    // long as the call preceded the purchase) — the days<0 guard still
+    // rejects orders that landed before the anchor.
     const days = (t - anchor) / 86_400_000;
-    if (days < 0 || days > a.attribution_days) continue;
+    if (days < 0 || (a.attribution_days > 0 && days > a.attribution_days)) continue;
     if (anchor > bestAnchor) {
       bestAnchor = anchor;
       best = f;

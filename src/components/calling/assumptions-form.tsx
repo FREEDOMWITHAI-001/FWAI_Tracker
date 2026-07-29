@@ -156,7 +156,7 @@ export function AssumptionsForm({
 
       <Section title="Sales attribution">
         <div className="field-row">
-          <Field label="Attribution window (days)" hint="The order must land after the call and within this many days of it.">
+          <Field label="Attribution window (days)" hint="The order must land after the call and within this many days of it. 0 = no day cap — any order after the call counts.">
             <input
               className="input"
               type="number"
