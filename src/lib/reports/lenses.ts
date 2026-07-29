@@ -364,36 +364,55 @@ function lensL5(ctx: Ctx): LensResult {
       if (arr) arr.push(f);
       else tagMembers.set(t, [f]);
     }
-  const rosterFor = (dialledBy: Fact[]): Fact[] => {
-    let best: Fact[] | null = null;
-    let bestCov = 0;
+  // The MOST SPECIFIC list wins: among tags covering >= 60% of the campaign's
+  // dialled people, take the smallest member set — a giant superset tag (a
+  // membership-wide label everyone carries) must not beat the actual call
+  // list. null when no tag qualifies.
+  const rosterFor = (dialledBy: Fact[]): { tag: string; members: Fact[] } | null => {
+    let best: { tag: string; members: Fact[] } | null = null;
     const dialledKeys = new Set(dialledBy.map((f) => f.person_key));
-    for (const members of tagMembers.values()) {
+    for (const [tag, members] of tagMembers) {
       if (members.length < dialledBy.length * 0.5) continue;
       let overlap = 0;
       for (const m of members) if (dialledKeys.has(m.person_key)) overlap++;
-      const cov = dialledBy.length ? overlap / dialledBy.length : 0;
-      if (cov > bestCov || (cov === bestCov && best != null && members.length < best.length)) {
-        bestCov = cov;
-        best = members;
-      }
+      if (!dialledBy.length || overlap / dialledBy.length < 0.6) continue;
+      if (!best || members.length < best.members.length) best = { tag, members };
     }
-    return bestCov >= 0.6 && best ? best : dialledBy;
+    return best;
   };
+
+  // Bots that dial from the SAME list are one wave — separate strata would
+  // count that list's baseline once per bot and a shared buyer once per bot.
+  const groups = new Map<string, { bots: string[]; roster: Fact[] | null }>();
+  for (const b of detected) {
+    const dialledBy = pool.filter((f) => f.dialled_bots?.includes(b));
+    const roster = rosterFor(dialledBy);
+    const key = roster ? `tag:${roster.tag}` : `bot:${b}`;
+    const g = groups.get(key);
+    if (g) g.bots.push(b);
+    else groups.set(key, { bots: [b], roster: roster?.members ?? null });
+  }
+
   const inWindow = (f: Fact, metric: Outcome['metric'], firstDay: string | null) =>
     !!f[metric] && (metric !== 'bought' || !firstDay || !!(f.order_time && f.order_time.slice(0, 10) >= firstDay));
   for (const o of r.outcomes) {
-    const strata: Stratum[] = detected.map((b) => {
-      const dialledBy = pool.filter((f) => f.dialled_bots?.includes(b));
-      const reached = dialledBy.filter((f) => f.bots?.includes(b));
+    const strata: Stratum[] = [...groups.values()].map((g) => {
+      const dialledBy = pool.filter((f) => g.bots.some((b) => f.dialled_bots?.includes(b)));
+      const reached = dialledBy.filter((f) => g.bots.some((b) => f.bots?.includes(b)));
       const reachedKeys = new Set(reached.map((f) => f.person_key));
-      const baseline = rosterFor(dialledBy).filter((f) => !reachedKeys.has(f.person_key));
+      // Sales baseline is dialled-only: after buyer-restoration every buyer is
+      // by construction a dialled person, so never-called roster members can
+      // hold NO buyers and a list-wide baseline would fake a huge lift.
+      // Show-up has no such artefact — never-called people do attend — so the
+      // list roster (with its not-called members) is the right baseline there.
+      const rosterBase = o.metric === 'bought' ? dialledBy : g.roster ?? dialledBy;
+      const baseline = rosterBase.filter((f) => !reachedKeys.has(f.person_key));
       const firstDay = reached.reduce<string | null>(
         (t, f) => (f.call_time && (!t || f.call_time < t) ? f.call_time : t),
         null
       )?.slice(0, 10) ?? null;
       return {
-        key: b,
+        key: g.bots.join(' + '),
         aK: reached.filter((f) => inWindow(f, o.metric, firstDay)).length,
         aN: reached.length,
         bK: baseline.filter((f) => inWindow(f, o.metric, firstDay)).length,
@@ -404,10 +423,11 @@ function lensL5(ctx: Ctx): LensResult {
     if (byCampaign) o.normalized = byCampaign;
   }
   r.caveats.push(
-    'Session-weighted figures on this lens are stratified by CAMPAIGN (bot) on campaign slots: reached vs that ' +
-      "campaign's own list not reached (list inferred from the leads file's tags; never-called list members are in the " +
-      'baseline, exclude-tagged people are in neither side). A sale counts inside a campaign only if it landed on/after ' +
-      "that campaign's first call day."
+    'Session-weighted figures on this lens are stratified by CAMPAIGN WAVE (bots sharing one registration list merge ' +
+      "into one wave; the list is the most specific leads-file tag covering the wave's dialled people). Show-up is " +
+      "measured against the wave's own list including its never-called members; the sales baseline is dialled-but-not-" +
+      'reached only, because after buyer-restoration never-called members cannot contain buyers. A sale counts inside a ' +
+      "wave only if it landed on/after that wave's first call day. Exclude-tagged people are in neither side."
   );
 
   // The Coacheasily "Show-up & Buyers by Bot" matrix: every row is measured
