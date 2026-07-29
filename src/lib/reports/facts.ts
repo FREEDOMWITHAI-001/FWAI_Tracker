@@ -311,7 +311,14 @@ export function buildFacts(
         const join = parseWhen(pick(row, ds.mapping, 'join_time'), joinOrder);
         const leave = parseWhen(pick(row, ds.mapping, 'leave_time'), joinOrder);
         const day = istDay(start) ?? istDay(join);
-        const key = sessionKeyFrom(id, day) ?? blockSessionKey ?? '__all__';
+        // The block's session identity outranks a row-derived date key: in a
+        // two-table Zoom export the participant rows carry no meeting id, and
+        // keying them by join-date would split the webinar into a date-keyed
+        // half (all the attendance) and an id-keyed half (calls + leads that
+        // resolve to the block session) — two phantom sessions per day that
+        // wreck the per-webinar weighting. Only a row's OWN meeting id may
+        // override the block.
+        const key = (id ? sessionKeyFrom(id, day) : null) ?? blockSessionKey ?? sessionKeyFrom('', day) ?? '__all__';
 
         if (pass === 'claim') {
           const cur = sessionOwner.get(key);
