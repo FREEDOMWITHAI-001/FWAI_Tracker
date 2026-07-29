@@ -468,30 +468,47 @@ function RoleCard({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
 
-  const upload = async (file: File, force = false) => {
+  // Returns the dataset id if it still needs a column mapped, else null.
+  const uploadOne = async (file: File, force = false): Promise<string | null> => {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('role', role);
+    if (force) fd.append('force', '1');
+    const res = await fetch(`/api/calling-reports/${reportId}/datasets`, { method: 'POST', body: fd });
+    const text = await res.text();
+    const json = text ? JSON.parse(text) : null;
+    if (!res.ok) {
+      if (res.status === 409 && confirm(`${json?.error}\n\nUpload it anyway?`)) return uploadOne(file, true);
+      throw new Error(json?.error || `Upload failed (${res.status})`);
+    }
+    return json?.unmapped_required?.length ? (json.id as string) : null;
+  };
+
+  // Multiple files in one pick (e.g. nine per-day Zoom exports) upload
+  // sequentially; one bad file reports its error and the rest still land.
+  const upload = async (files: FileList) => {
     setBusy(true);
     onError('');
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('role', role);
-      if (force) fd.append('force', '1');
-      const res = await fetch(`/api/calling-reports/${reportId}/datasets`, { method: 'POST', body: fd });
-      const text = await res.text();
-      const json = text ? JSON.parse(text) : null;
-      if (!res.ok) {
-        if (res.status === 409 && confirm(`${json?.error}\n\nUpload it anyway?`)) return upload(file, true);
-        throw new Error(json?.error || `Upload failed (${res.status})`);
+    const list = [...files];
+    const errors: string[] = [];
+    let firstMapId: string | null = null;
+    for (let i = 0; i < list.length; i++) {
+      if (list.length > 1) setProgress(`${i + 1}/${list.length}`);
+      try {
+        const mapId = await uploadOne(list[i]);
+        if (mapId && !firstMapId) firstMapId = mapId;
+      } catch (e: any) {
+        errors.push(`${list[i].name}: ${e.message}`);
       }
       onChanged();
-      if (json?.unmapped_required?.length) onMap(json.id);
-    } catch (e: any) {
-      onError(e.message);
-    } finally {
-      setBusy(false);
-      if (inputRef.current) inputRef.current.value = '';
     }
+    setBusy(false);
+    setProgress(null);
+    if (inputRef.current) inputRef.current.value = '';
+    if (errors.length) onError(errors.join(' · '));
+    if (firstMapId) onMap(firstMapId);
   };
 
   const zoomSync = async () => {
@@ -529,14 +546,15 @@ function RoleCard({
           )}
           <button className="btn" style={{ padding: '5px 11px', fontSize: 12.5 }} onClick={() => inputRef.current?.click()} disabled={busy}>
             <IconUpload />
-            {busy ? 'Working…' : 'Upload'}
+            {busy ? (progress ? `Uploading ${progress}…` : 'Working…') : 'Upload'}
           </button>
           <input
             ref={inputRef}
             type="file"
+            multiple
             accept=".csv,.xlsx,.xlsm,text/csv"
             style={{ display: 'none' }}
-            onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
+            onChange={(e) => e.target.files?.length && upload(e.target.files)}
           />
         </div>
       </div>
