@@ -75,6 +75,14 @@ export interface Assumptions {
   significance_alpha: number;
   min_cohort_n: number; // below this a comparison is flagged underpowered
   exclude_products: string[]; // product-name substrings that are not "the course"
+  // --- do-not-call tagged registrants -------------------------------------
+  // Tag substrings (matched case-insensitively against the leads file's tags
+  // column) that mark a registrant as deliberately not-called (existing
+  // members, DND). A tagged registrant who was NEVER dialled becomes their
+  // own funnel row and is kept out of every baseline — these people attend
+  // at ~99% and would inflate any "not called" comparison. A tagged person
+  // who was dialled anyway counts normally.
+  exclude_tags: string[];
   timezone_offset_minutes: number; // all data is IST => 330
 
   // --- identity crosswalk ---------------------------------------------------
@@ -129,6 +137,7 @@ export const DEFAULT_ASSUMPTIONS: Assumptions = {
   significance_alpha: 0.05,
   min_cohort_n: 30,
   exclude_products: [],
+  exclude_tags: ['exclude from', 'do not call', 'dnd'],
   timezone_offset_minutes: 330,
   crosswalk_enabled: true,
   crosswalk_use_name: false,
@@ -167,7 +176,8 @@ export interface Fact {
   bought: boolean;
   order_value: number | null;
   order_time: string | null;
-  holdout: boolean; // registered but never dialled
+  holdout: boolean; // registered but never dialled (excl. do-not-call tagged)
+  excluded_tagged: boolean; // exclude-tagged registrant, never dialled — own column, no baseline
   week: string | null; // ISO week in IST, e.g. "2026-W27"
   session_date: string | null; // yyyy-mm-dd (IST)
   ai_week: boolean;

@@ -260,6 +260,12 @@ function lensL2(ctx: Ctx): LensResult {
     `${B.length.toLocaleString()} registrants were never dialled. If the dial list was filtered on lead quality, ` +
       'this comparison mostly measures that filter.'
   );
+  const excluded = registered.filter((f) => f.excluded_tagged).length;
+  if (excluded)
+    r.caveats.push(
+      `${excluded.toLocaleString()} exclude-tagged registrants (deliberately never dialled) are kept OUT of the ` +
+        'never-called baseline — they attend at ~99% and would inflate it.'
+    );
   return r;
 }
 

@@ -179,6 +179,7 @@ export function mergeAssumptions(stored: unknown): Assumptions {
     // the default with undefined and blow up on `.length` / `.some()`.
     coupon_codes: s.coupon_codes ?? [],
     product_prices: s.product_prices ?? [],
+    exclude_tags: s.exclude_tags ?? DEFAULT_ASSUMPTIONS.exclude_tags,
     zero_without_coupon: s.zero_without_coupon ?? DEFAULT_ASSUMPTIONS.zero_without_coupon,
     talk_rule: s.talk_rule ?? DEFAULT_ASSUMPTIONS.talk_rule,
     talk_min_seconds: s.talk_min_seconds ?? DEFAULT_ASSUMPTIONS.talk_min_seconds,

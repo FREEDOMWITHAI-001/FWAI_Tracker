@@ -480,6 +480,7 @@ export function buildFacts(
     ref: PersonRef;
     session_key: string | null;
     registered_at: string | null;
+    tags: string; // lowercased, accumulated across the person's rows
     rows: number;
   }
   const leads = new Map<string, LeadRec>();
@@ -492,14 +493,16 @@ export function buildFacts(
       const id = pick(row, ds.mapping, 'session_id');
       const day = istDay(parseWhen(pick(row, ds.mapping, 'session_date'), dateOrder));
       const reg = parseWhen(pick(row, ds.mapping, 'registered_at'), regOrder);
+      const tags = pick(row, ds.mapping, 'tags').toLowerCase();
       const key = sessionKeyFrom(id, day);
       const cur = leads.get(ref.key);
       if (cur) {
         cur.rows++;
         if (!cur.session_key && key) cur.session_key = key;
         if (reg && (!cur.registered_at || reg < cur.registered_at)) cur.registered_at = reg;
+        if (tags && !cur.tags.includes(tags)) cur.tags += ` ${tags}`;
       } else {
-        leads.set(ref.key, { ref, session_key: key, registered_at: reg, rows: 1 });
+        leads.set(ref.key, { ref, session_key: key, registered_at: reg, tags, rows: 1 });
       }
       if (key) touchSession(key, { date: day });
     }
@@ -691,6 +694,11 @@ export function buildFacts(
         a.talk_rule === 'tighten_connected' ? clearedFloor : !!call?.connected;
 
       const registered = hasLeads ? !!lead : !!call;
+      // Exclude-tagged AND never dialled: own column, out of every baseline.
+      // (Verified on EPH: exclude-tagged people attend at ~99%; a tagged
+      // person who was dialled anyway just counts normally.)
+      const excludedTag =
+        !!lead && !call && a.exclude_tags.some((t) => t && lead.tags.includes(t.toLowerCase().trim()));
       const fact: Fact = {
         person_key: key,
         session_key: sk,
@@ -715,7 +723,8 @@ export function buildFacts(
         bought: false,
         order_value: null,
         order_time: null,
-        holdout: registered && !call,
+        holdout: registered && !call && !excludedTag,
+        excluded_tagged: excludedTag,
         week: session?.week ?? null,
         session_date: session?.date ?? null,
         ai_week: false,
@@ -726,6 +735,14 @@ export function buildFacts(
       else factIndex.set(key, [fact]);
     }
   }
+
+  let excludedTaggedCount = 0;
+  for (const fs of factIndex.values()) if (fs.some((f) => f.excluded_tagged)) excludedTaggedCount++;
+  if (excludedTaggedCount)
+    notes.push(
+      `${excludedTaggedCount.toLocaleString()} registrants carry a do-not-call/exclude tag and were never dialled — ` +
+        'shown as their own funnel row and kept out of every baseline (these people attend at ~99% and would inflate it).'
+    );
 
   stats.leads.unique_people = leads.size;
   stats.calls.unique_people = calls.size;
@@ -900,7 +917,8 @@ export function analysisFacts(facts: Fact[], mode: 'unique_member' | 'raw_row'):
     cur.showed_up ||= f.showed_up;
     cur.left_early ||= f.left_early;
     cur.came_back ||= f.came_back;
-    cur.holdout = cur.registered && !cur.dialled;
+    cur.excluded_tagged ||= f.excluded_tagged;
+    cur.holdout = cur.registered && !cur.dialled && !cur.excluded_tagged;
     if (f.talk_turns != null) cur.talk_turns = Math.max(cur.talk_turns ?? 0, f.talk_turns);
     if (f.watch_minutes != null) cur.watch_minutes = (cur.watch_minutes ?? 0) + f.watch_minutes;
     if (f.bought) {

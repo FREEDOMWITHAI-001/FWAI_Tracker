@@ -193,6 +193,16 @@ export function AssumptionsForm({
               onChange={(e) => set('exclude_products', list(e.target.value))}
             />
           </Field>
+          <Field
+            label="Do-not-call tag patterns"
+            hint="Comma separated substrings matched against the leads file's Tags column. A tagged registrant who was never dialled becomes their own funnel row and is kept out of every baseline (they attend at ~99%)."
+          >
+            <input
+              className="input"
+              value={(value.exclude_tags ?? []).join(', ')}
+              onChange={(e) => set('exclude_tags', list(e.target.value))}
+            />
+          </Field>
         </div>
         <Check
           label="Only attribute sales to people we actually called"

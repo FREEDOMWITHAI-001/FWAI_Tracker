@@ -30,6 +30,13 @@ export const FIELD_SPECS: Record<InputRole, FieldSpec[]> = {
     { field: 'session_date', label: 'Webinar date', required: false, synonyms: ['webinar date', 'session date', 'event date', 'start time', 'webinar start', 'date'] },
     { field: 'registered_at', label: 'Registered at', required: false, synonyms: ['registration time', 'registered at', 'created at', 'date added', 'signup time', 'opt in date', 'submitted on'] },
     { field: 'lead_source', label: 'Source', required: false, synonyms: ['source', 'utm source', 'campaign', 'channel'] },
+    {
+      field: 'tags',
+      label: 'Tags',
+      required: false,
+      synonyms: ['tags', 'tag', 'labels', 'contact tags'],
+      hint: 'Used to spot "exclude from calling" / do-not-call tagged registrants.',
+    },
   ],
   calls: [
     { field: 'phone', label: 'Phone', required: true, synonyms: PHONE },

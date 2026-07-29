@@ -117,11 +117,16 @@ function buildFunnel(facts: Fact[], denominator: number, label: string): FunnelS
   const connected = facts.filter((f) => f.connected).length;
   const showed = facts.filter((f) => f.showed_up).length;
   const bought = facts.filter((f) => f.bought).length;
+  // Exclude-tagged registrants who were never dialled get their own row and
+  // are NOT part of "Not called" — they were skipped on purpose (existing
+  // members / DND) and attend at ~99%, so lumping them into the not-called
+  // baseline would inflate it.
+  const excludedTagged = facts.filter((f) => f.excluded_tagged).length;
   // "Not picked" and "Not called" are complements of Dialled/Connected, not
   // further drops in the main line — each is shown as a % of the stage it
   // splits off from (Dialled, denominator) rather than of the row above it.
   const notPicked = dialled - connected;
-  const notCalled = denominator - dialled;
+  const notCalled = denominator - dialled - excludedTagged;
 
   const stage = (s: string, count: number, prevCount: number | null, basisLabel: string | null): FunnelStage => ({
     stage: s,
@@ -137,6 +142,7 @@ function buildFunnel(facts: Fact[], denominator: number, label: string): FunnelS
     stage('Connected', connected, dialled, 'Dialled'),
     stage('Not picked', notPicked, dialled, 'Dialled'),
     stage('Not called', notCalled, denominator, label),
+    ...(excludedTagged ? [stage('Excluded (do-not-call tagged)', excludedTagged, denominator, label)] : []),
     stage('Showed up', showed, connected, 'Connected'),
     stage('Bought', bought, showed, 'Showed up'),
   ];
