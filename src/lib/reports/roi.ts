@@ -102,7 +102,7 @@ export function buildRoi(
     notes.push(
       `Incremental ROI uses ${chosen.id} (${chosen.label}) — ${(lift * 100).toFixed(2)}pp purchase lift ` +
         (norm
-          ? `(per-webinar deltas weighted by each webinar's treated people, negatives kept, across ${norm.sessions_used} of ${norm.sessions_total} webinars; pooled lift would be ${(outcome.abs_lift * 100).toFixed(2)}pp) `
+          ? `(per-stratum deltas weighted by each campaign/webinar's treated people, negatives kept, across ${norm.sessions_used} of ${norm.sessions_total} strata; pooled lift would be ${(outcome.abs_lift * 100).toFixed(2)}pp) `
           : '') +
         `on ${treated.toLocaleString()} treated people at ₹${Math.round(avgOrder).toLocaleString()} average order value.`
     );

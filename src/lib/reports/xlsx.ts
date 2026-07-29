@@ -575,8 +575,8 @@ function sheetRoi(wb: ExcelJS.Workbook, r: ReportResult) {
   const lens = roi.incremental_lens ? r.lenses.find((l) => l.id === roi.incremental_lens) : null;
   const norm = lens?.outcomes.find((o) => o.metric === 'bought')?.normalized;
   if (norm?.strata?.length) {
-    row = sectionBar(ws, row, 'Per-webinar extra buyers — the addition behind the headline (negatives kept)', 4);
-    row = headerRow(ws, row, ['Webinar', 'Treated', 'Treated buy% − baseline buy%', 'Extra buyers']);
+    row = sectionBar(ws, row, 'Per-campaign/webinar extra buyers — the addition behind the headline (negatives kept)', 4);
+    row = headerRow(ws, row, ['Campaign / webinar', 'Treated (reached)', 'Treated buy% − baseline buy%', 'Extra buyers']);
     const sessions = new Map(r.sessions.map((s) => [s.key, s]));
     for (const st of norm.strata) {
       const s = sessions.get(st.key);

@@ -374,8 +374,8 @@ function Roi({ result }: { result: ReportResult }) {
           <table className="smatrix" style={{ marginBottom: 12 }}>
             <thead>
               <tr>
-                <th style={{ textAlign: 'left' }}>Webinar</th>
-                <th style={{ textAlign: 'right' }}>Treated</th>
+                <th style={{ textAlign: 'left' }}>Campaign / webinar</th>
+                <th style={{ textAlign: 'right' }}>Treated (reached)</th>
                 <th style={{ textAlign: 'right' }}>Δ buy% (vs own baseline)</th>
                 <th style={{ textAlign: 'right' }}>Extra buyers</th>
               </tr>

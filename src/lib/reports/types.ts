@@ -164,7 +164,10 @@ export interface Fact {
   talk_turns: number | null;
   engaged: boolean;
   talked: boolean; // connected AND cleared the talk_min_seconds floor
-  bots: string[]; // every bot that reached this person (auto-detected names)
+  bots: string[]; // every bot that REACHED this person (auto-detected names)
+  // Every bot/campaign that DIALLED this person, reached or not. Optional so
+  // facts persisted before this field existed still deserialise.
+  dialled_bots?: string[];
   bot_id: string | null;
   call_mode: 'ai' | 'manual' | null;
   call_time: string | null;

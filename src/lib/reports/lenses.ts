@@ -339,6 +339,33 @@ function lensL5(ctx: Ctx): LensResult {
   r.cohort_b_label = 'Dialled, no bot reached';
   r.outcomes = outcomesFor(anyBot, noBot, r.cohort_a_label, r.cohort_b_label, ctx.a);
 
+  // SOP "BY CAMPAIGN" weighting: for THIS lens the natural stratum is the
+  // campaign (bot), not the Zoom session — each campaign's reached cohort is
+  // compared against the people THAT campaign dialled but did not reach, and
+  // everything is counted on campaign slots (a person dialled by two
+  // campaigns appears in each). This replaces the session strata whenever at
+  // least two campaigns can form the comparison.
+  for (const o of r.outcomes) {
+    const strata: Stratum[] = detected.map((b) => {
+      const reached = called.filter((f) => f.bots?.includes(b));
+      const notReached = called.filter((f) => f.dialled_bots?.includes(b) && !f.bots?.includes(b));
+      return {
+        key: b,
+        aK: reached.filter((f) => f[o.metric]).length,
+        aN: reached.length,
+        bK: notReached.filter((f) => f[o.metric]).length,
+        bN: notReached.length,
+      };
+    });
+    const byCampaign = normalizedComparison(strata);
+    if (byCampaign) o.normalized = byCampaign;
+  }
+  r.caveats.push(
+    'Session-weighted figures on this lens are stratified by CAMPAIGN (bot), reached vs dialled-but-not-reached, ' +
+      'counted on campaign slots — a person dialled by two campaigns appears in each, per the SOP. Registrants a ' +
+      'campaign never dialled are not in its baseline, so this is the conservative (dialled-only) variant.'
+  );
+
   // The Coacheasily "Show-up & Buyers by Bot" matrix: every row is measured
   // against the dialled-but-no-bot-reached baseline, and a lead reached by two
   // bots is counted under EACH of them plus the "2+ bots" row.

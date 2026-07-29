@@ -712,6 +712,7 @@ export function buildFacts(
         engaged: turns != null && turns >= a.engaged_min_turns,
         talked,
         bots: call ? [...call.reached_bots].sort() : [],
+        dialled_bots: call ? [...call.bots].sort() : [],
         bot_id: call ? botLabel(call.reached_bots) : null,
         call_mode: call ? (call.modes.has('manual') && !call.modes.has('ai') ? 'manual' : call.modes.has('manual') ? 'manual' : 'ai') : null,
         call_time: call?.first_call ?? null,
@@ -914,6 +915,7 @@ export function analysisFacts(facts: Fact[], mode: 'unique_member' | 'raw_row'):
     cur.engaged ||= f.engaged;
     cur.talked ||= f.talked;
     if (f.bots?.length) cur.bots = [...new Set([...(cur.bots ?? []), ...f.bots])].sort();
+    if (f.dialled_bots?.length) cur.dialled_bots = [...new Set([...(cur.dialled_bots ?? []), ...f.dialled_bots])].sort();
     cur.showed_up ||= f.showed_up;
     cur.left_early ||= f.left_early;
     cur.came_back ||= f.came_back;
