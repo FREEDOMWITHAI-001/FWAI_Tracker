@@ -674,6 +674,10 @@ export function buildFacts(
     }
     if (sessionKeys.includes('__all__') && sessionKeys.length === 1) touchSession('__all__', { topic: '(no session dimension)' });
 
+    const leadTags = lead?.tags
+      ? lead.tags.split(',').map((t) => t.trim()).filter(Boolean)
+      : [];
+
     for (const sk of sessionKeys) {
       const session = sessions.get(sk);
       const aRec = att?.get(sk);
@@ -713,6 +717,7 @@ export function buildFacts(
         talked,
         bots: call ? [...call.reached_bots].sort() : [],
         dialled_bots: call ? [...call.bots].sort() : [],
+        tags: leadTags,
         bot_id: call ? botLabel(call.reached_bots) : null,
         call_mode: call ? (call.modes.has('manual') && !call.modes.has('ai') ? 'manual' : call.modes.has('manual') ? 'manual' : 'ai') : null,
         call_time: call?.first_call ?? null,
@@ -916,6 +921,7 @@ export function analysisFacts(facts: Fact[], mode: 'unique_member' | 'raw_row'):
     cur.talked ||= f.talked;
     if (f.bots?.length) cur.bots = [...new Set([...(cur.bots ?? []), ...f.bots])].sort();
     if (f.dialled_bots?.length) cur.dialled_bots = [...new Set([...(cur.dialled_bots ?? []), ...f.dialled_bots])].sort();
+    if (f.tags?.length) cur.tags = [...new Set([...(cur.tags ?? []), ...f.tags])];
     cur.showed_up ||= f.showed_up;
     cur.left_early ||= f.left_early;
     cur.came_back ||= f.came_back;

@@ -341,29 +341,73 @@ function lensL5(ctx: Ctx): LensResult {
 
   // SOP "BY CAMPAIGN" weighting: for THIS lens the natural stratum is the
   // campaign (bot), not the Zoom session — each campaign's reached cohort is
-  // compared against the people THAT campaign dialled but did not reach, and
+  // compared against ITS OWN registration list's not-reached members, and
   // everything is counted on campaign slots (a person dialled by two
-  // campaigns appears in each). This replaces the session strata whenever at
-  // least two campaigns can form the comparison.
+  // campaigns appears in each).
+  //
+  // Roster inference: bots only dial from lists, and list membership lives in
+  // the leads file's tags — so the tag that covers the most of a campaign's
+  // dialled people (>= 60%) is taken as that campaign's list. This puts the
+  // list's never-called members into the campaign baseline; without them the
+  // baseline is only dialled-but-not-reached, which is tiny and over-credits
+  // small campaigns. When no tag qualifies, dialled-not-reached stands in.
+  //
+  // Purchase-timing guard (SOP): a sale counts inside a campaign only if it
+  // landed on/after that campaign's first call day — a campaign cannot claim
+  // sales that predate its own calls. Exclude-tagged people stay out of both
+  // sides.
+  const pool = ctx.facts.filter((f) => !f.excluded_tagged);
+  const tagMembers = new Map<string, Fact[]>();
+  for (const f of pool)
+    for (const t of f.tags ?? []) {
+      const arr = tagMembers.get(t);
+      if (arr) arr.push(f);
+      else tagMembers.set(t, [f]);
+    }
+  const rosterFor = (dialledBy: Fact[]): Fact[] => {
+    let best: Fact[] | null = null;
+    let bestCov = 0;
+    const dialledKeys = new Set(dialledBy.map((f) => f.person_key));
+    for (const members of tagMembers.values()) {
+      if (members.length < dialledBy.length * 0.5) continue;
+      let overlap = 0;
+      for (const m of members) if (dialledKeys.has(m.person_key)) overlap++;
+      const cov = dialledBy.length ? overlap / dialledBy.length : 0;
+      if (cov > bestCov || (cov === bestCov && best != null && members.length < best.length)) {
+        bestCov = cov;
+        best = members;
+      }
+    }
+    return bestCov >= 0.6 && best ? best : dialledBy;
+  };
+  const inWindow = (f: Fact, metric: Outcome['metric'], firstDay: string | null) =>
+    !!f[metric] && (metric !== 'bought' || !firstDay || !!(f.order_time && f.order_time.slice(0, 10) >= firstDay));
   for (const o of r.outcomes) {
     const strata: Stratum[] = detected.map((b) => {
-      const reached = called.filter((f) => f.bots?.includes(b));
-      const notReached = called.filter((f) => f.dialled_bots?.includes(b) && !f.bots?.includes(b));
+      const dialledBy = pool.filter((f) => f.dialled_bots?.includes(b));
+      const reached = dialledBy.filter((f) => f.bots?.includes(b));
+      const reachedKeys = new Set(reached.map((f) => f.person_key));
+      const baseline = rosterFor(dialledBy).filter((f) => !reachedKeys.has(f.person_key));
+      const firstDay = reached.reduce<string | null>(
+        (t, f) => (f.call_time && (!t || f.call_time < t) ? f.call_time : t),
+        null
+      )?.slice(0, 10) ?? null;
       return {
         key: b,
-        aK: reached.filter((f) => f[o.metric]).length,
+        aK: reached.filter((f) => inWindow(f, o.metric, firstDay)).length,
         aN: reached.length,
-        bK: notReached.filter((f) => f[o.metric]).length,
-        bN: notReached.length,
+        bK: baseline.filter((f) => inWindow(f, o.metric, firstDay)).length,
+        bN: baseline.length,
       };
     });
     const byCampaign = normalizedComparison(strata);
     if (byCampaign) o.normalized = byCampaign;
   }
   r.caveats.push(
-    'Session-weighted figures on this lens are stratified by CAMPAIGN (bot), reached vs dialled-but-not-reached, ' +
-      'counted on campaign slots — a person dialled by two campaigns appears in each, per the SOP. Registrants a ' +
-      'campaign never dialled are not in its baseline, so this is the conservative (dialled-only) variant.'
+    'Session-weighted figures on this lens are stratified by CAMPAIGN (bot) on campaign slots: reached vs that ' +
+      "campaign's own list not reached (list inferred from the leads file's tags; never-called list members are in the " +
+      'baseline, exclude-tagged people are in neither side). A sale counts inside a campaign only if it landed on/after ' +
+      "that campaign's first call day."
   );
 
   // The Coacheasily "Show-up & Buyers by Bot" matrix: every row is measured

@@ -168,6 +168,9 @@ export interface Fact {
   // Every bot/campaign that DIALLED this person, reached or not. Optional so
   // facts persisted before this field existed still deserialise.
   dialled_bots?: string[];
+  // The person's leads-file tags (lowercased). Bots dial from lists and list
+  // membership lives in these tags, so they define each campaign's roster.
+  tags?: string[];
   bot_id: string | null;
   call_mode: 'ai' | 'manual' | null;
   call_time: string | null;
