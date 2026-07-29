@@ -81,13 +81,32 @@ export function buildRoi(
 
   if (chosen) {
     const outcome = chosen.outcomes.find((o) => o.metric === 'bought')!;
-    incBuyers = Math.max(0, outcome.abs_lift * outcome.a.n);
+    // The session-weighted (normalised) lift beats the pooled one when it
+    // exists: pooled rates let a giant, barely-dialled list drag the baseline
+    // down and fake a bigger lift. Per the SOP the extra is computed per
+    // webinar (treated × delta, negatives KEPT) and summed — which equals
+    // lift × treated_n — so a net-negative cycle shows as negative, never
+    // clamped to zero.
+    const norm = outcome.normalized ?? null;
+    const lift = norm ? norm.abs_lift : outcome.abs_lift;
+    const treated = norm ? norm.treated_n : outcome.a.n;
+    incBuyers = lift * treated;
     incRevenue = incBuyers * avgOrder;
     incRoi = incRevenue / total;
     notes.push(
-      `Incremental ROI uses ${chosen.id} (${chosen.label}) — ${(outcome.abs_lift * 100).toFixed(2)}pp purchase lift ` +
-        `on ${outcome.a.n.toLocaleString()} treated people at ₹${Math.round(avgOrder).toLocaleString()} average order value.`
+      `Incremental ROI uses ${chosen.id} (${chosen.label}) — ${(lift * 100).toFixed(2)}pp purchase lift ` +
+        (norm
+          ? `(per-webinar deltas weighted by each webinar's treated people, negatives kept, across ${norm.sessions_used} of ${norm.sessions_total} webinars; pooled lift would be ${(outcome.abs_lift * 100).toFixed(2)}pp) `
+          : '') +
+        `on ${treated.toLocaleString()} treated people at ₹${Math.round(avgOrder).toLocaleString()} average order value.`
     );
+    notes.push(
+      `Of the ${outcome.a.k.toLocaleString()} buyers in the treated group, ~${Math.min(outcome.a.k, outcome.a.k - incBuyers).toFixed(1)} would have bought anyway (buyers minus the credited extra).`
+    );
+    if (!norm)
+      notes.push(
+        'No session-weighted lift was possible (it needs at least two webinars containing both cohorts), so the pooled lift was used.'
+      );
     if (!outcome.significance.significant)
       notes.push(
         `That lift is not statistically significant (p=${fmtP(outcome.significance.p_value)}), so the incremental ROI is indicative, not established.`

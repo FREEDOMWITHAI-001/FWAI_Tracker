@@ -22,6 +22,7 @@ import type {
   Fact,
   FunnelStage,
   LensResult,
+  Outcome,
   PerWebinarRow,
   QualityPanel,
   RegisteredRetargetedBlock,
@@ -508,11 +509,16 @@ function buildScorecard(
   } else {
     const buy = primary.outcomes.find((o) => o.metric === 'bought');
     const show = primary.outcomes.find((o) => o.metric === 'showed_up');
+    // Headline quotes the session-weighted (normalised) lift when it exists —
+    // the pooled lift is still on the lens table for comparison.
+    const liftAbs = (o: Outcome) => o.normalized?.abs_lift ?? o.abs_lift;
+    const liftRel = (o: Outcome) => (o.normalized ? o.normalized.rel_lift : o.rel_lift);
+    const weighted = Boolean(show?.normalized || buy?.normalized);
     const parts: string[] = [];
-    if (show) parts.push(`show-up ${signed(show.abs_lift)} (${fmtRel(show.rel_lift)})`);
-    if (buy) parts.push(`purchase ${signed(buy.abs_lift)} (${fmtRel(buy.rel_lift)})`);
+    if (show) parts.push(`show-up ${signed(liftAbs(show))} (${fmtRel(liftRel(show))})`);
+    if (buy) parts.push(`purchase ${signed(liftAbs(buy))} (${fmtRel(liftRel(buy))})`);
     headline =
-      `${primary.cohort_a_label} vs ${primary.cohort_b_label}: ${parts.join(', ')}. ` +
+      `${primary.cohort_a_label} vs ${primary.cohort_b_label}: ${parts.join(', ')}${weighted ? ' — session-weighted' : ''}. ` +
       `[${primary.id} — ${primary.credibility === 'causal' ? 'causally credible' : 'DIRECTIONAL ONLY'}]`;
 
     const sig = buy?.significance ?? show?.significance;

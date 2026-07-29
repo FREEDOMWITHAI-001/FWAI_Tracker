@@ -14,6 +14,7 @@ import type { LensResult, ReportResult } from '@/lib/reports/types';
 
 const pct = (v: number, dp = 1) => `${(v * 100).toFixed(dp)}%`;
 const delta = (v: number | null) => (v == null ? 'n/a' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%`);
+const deltaPp = (v: number | null | undefined) => (v == null ? 'n/a' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}pp`);
 const money = (v: number) => `₹${Math.round(v).toLocaleString()}`;
 
 export function CredibilityBadge({ lens }: { lens: LensResult }) {
@@ -126,7 +127,7 @@ function Lenses({ result }: { result: ReportResult }) {
     <div className="card" style={{ marginBottom: 16 }}>
       <div className="card-h">
         <h3>Comparisons</h3>
-        <span className="updated">credible lenses first · Δ is relative lift vs the baseline row</span>
+        <span className="updated">credible lenses first · Δpp is the absolute gap vs the baseline row · Δ% is the relative lift</span>
       </div>
       <div className="card-b" style={{ paddingTop: 12 }}>
         {result.lenses.map((l) => (
@@ -182,10 +183,12 @@ function LensCard({ lens }: { lens: LensResult }) {
                     <th style={{ textAlign: 'right' }}>People</th>
                     <th style={{ textAlign: 'right' }}>Showed</th>
                     <th style={{ textAlign: 'right' }}>Show-up %</th>
-                    <th style={{ textAlign: 'right' }}>Δ</th>
+                    <th style={{ textAlign: 'right' }}>Δpp</th>
+                    <th style={{ textAlign: 'right' }}>Δ%</th>
                     <th style={{ textAlign: 'right' }}>Bought</th>
                     <th style={{ textAlign: 'right' }}>Buyer %</th>
-                    <th style={{ textAlign: 'right' }}>Δ</th>
+                    <th style={{ textAlign: 'right' }}>Δpp</th>
+                    <th style={{ textAlign: 'right' }}>Δ%</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -195,11 +198,17 @@ function LensCard({ lens }: { lens: LensResult }) {
                       <td className="num">{r.n.toLocaleString()}</td>
                       <td className="num">{r.showed.toLocaleString()}</td>
                       <td className="num">{pct(r.show_rate)}</td>
+                      <td className="num" style={{ color: liftColor(r.show_lift_abs ?? r.show_lift) }}>
+                        {r.baseline ? '—' : deltaPp(r.show_lift_abs)}
+                      </td>
                       <td className="num" style={{ color: liftColor(r.show_lift) }}>
                         {r.baseline ? '—' : delta(r.show_lift)}
                       </td>
                       <td className="num">{r.bought.toLocaleString()}</td>
                       <td className="num">{pct(r.buy_rate)}</td>
+                      <td className="num" style={{ color: liftColor(r.buy_lift_abs ?? r.buy_lift) }}>
+                        {r.baseline ? '—' : deltaPp(r.buy_lift_abs)}
+                      </td>
                       <td className="num" style={{ color: liftColor(r.buy_lift) }}>
                         {r.baseline ? '—' : delta(r.buy_lift)}
                       </td>
@@ -213,7 +222,7 @@ function LensCard({ lens }: { lens: LensResult }) {
                   <div key={o.metric} style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 6 }}>
                     <b style={{ color: 'var(--ink)' }}>{o.label}:</b> {pct(o.a.rate)} ({o.a.k}/{o.a.n}) vs {pct(o.b.rate)} ({o.b.k}/
                     {o.b.n}) — {o.abs_lift >= 0 ? '+' : ''}
-                    {(o.abs_lift * 100).toFixed(2)}pp,{' '}
+                    {(o.abs_lift * 100).toFixed(2)}pp ({delta(o.rel_lift)}),{' '}
                     <span className={`pill ${o.significance.significant ? 'healthy' : 'neutral'}`}>
                       p = {o.significance.p_value == null ? 'n/a' : o.significance.p_value < 0.001 ? '<0.001' : o.significance.p_value.toFixed(3)}
                       {o.significance.significant ? ' · significant' : ' · not significant'}
@@ -223,6 +232,15 @@ function LensCard({ lens }: { lens: LensResult }) {
                         {' '}
                         95% CI {(o.significance.ci95[0] * 100).toFixed(1)}pp to {(o.significance.ci95[1] * 100).toFixed(1)}pp
                       </>
+                    )}
+                    {o.normalized && (
+                      <div style={{ marginTop: 3 }}>
+                        <b style={{ color: 'var(--ink)' }}>Session-weighted:</b> {pct(o.normalized.a_rate)} vs{' '}
+                        {pct(o.normalized.b_rate)} — {deltaPp(o.normalized.abs_lift)} ({delta(o.normalized.rel_lift)}), each
+                        webinar&apos;s delta vs its own baseline, weighted by its treated people (negatives kept), over{' '}
+                        {o.normalized.sessions_used}/{o.normalized.sessions_total} webinars ({pct(o.normalized.coverage, 0)} of
+                        people).
+                      </div>
                     )}
                     {o.significance.warnings.map((w, i) => (
                       <div key={i} style={{ color: 'var(--amber)', marginTop: 3 }}>
@@ -330,6 +348,11 @@ function PerWebinar({ result }: { result: ReportResult }) {
 function Roi({ result }: { result: ReportResult }) {
   const r = result.roi;
   const causal = r.incremental_credibility === 'causal';
+  // The audit line behind "incremental buyers": per-webinar treated × delta,
+  // negatives kept, summed — shown so the headline is a visible addition.
+  const lens = r.incremental_lens ? result.lenses.find((l) => l.id === r.incremental_lens) : null;
+  const norm = lens?.outcomes.find((o) => o.metric === 'bought')?.normalized;
+  const sessions = new Map(result.sessions.map((s) => [s.key, s]));
   return (
     <div className="card" style={{ marginBottom: 16 }}>
       <div className="card-h">
@@ -347,6 +370,42 @@ function Roi({ result }: { result: ReportResult }) {
             detail={r.incremental_lens ? `via ${r.incremental_lens} · ${causal ? 'credible' : 'directional'}` : 'no credible lens available'}
           />
         </div>
+        {norm?.strata && norm.strata.length > 0 && (
+          <table className="smatrix" style={{ marginBottom: 12 }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left' }}>Webinar</th>
+                <th style={{ textAlign: 'right' }}>Treated</th>
+                <th style={{ textAlign: 'right' }}>Δ buy% (vs own baseline)</th>
+                <th style={{ textAlign: 'right' }}>Extra buyers</th>
+              </tr>
+            </thead>
+            <tbody>
+              {norm.strata.map((st) => {
+                const s = sessions.get(st.key);
+                return (
+                  <tr key={st.key}>
+                    <td>{s ? `${s.date ?? ''} ${s.topic}`.trim() : st.key}</td>
+                    <td className="num">{st.a_n.toLocaleString()}</td>
+                    <td className="num" style={{ color: liftColor(st.a_rate - st.b_rate) }}>
+                      {deltaPp(st.a_rate - st.b_rate)}
+                    </td>
+                    <td className="num" style={{ color: liftColor(st.extra) }}>
+                      {st.extra >= 0 ? '+' : ''}
+                      {st.extra.toFixed(1)}
+                    </td>
+                  </tr>
+                );
+              })}
+              <tr style={{ background: 'var(--soft)', fontWeight: 600 }}>
+                <td>Total (= incremental buyers)</td>
+                <td className="num">{norm.treated_n.toLocaleString()}</td>
+                <td className="num">{deltaPp(norm.abs_lift)}</td>
+                <td className="num">{r.incremental_buyers != null ? `${r.incremental_buyers >= 0 ? '+' : ''}${r.incremental_buyers}` : '—'}</td>
+              </tr>
+            </tbody>
+          </table>
+        )}
         {r.notes.map((n, i) => (
           <div key={i} className="sub" style={{ color: 'var(--muted)', fontSize: 12.5, marginBottom: 4 }}>
             {n}

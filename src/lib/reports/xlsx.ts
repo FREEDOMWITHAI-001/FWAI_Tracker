@@ -21,6 +21,9 @@ const GRID = 'FFBFBFBF';
 const PCT = '0.0%';
 const PCT2 = '0.00%';
 const DELTA = '+0.0%;-0.0%';
+// Absolute gaps are written pre-multiplied by 100 (percentage points, not a
+// fraction), so the format carries a literal "pp" instead of Excel's %.
+const DELTA_PP = '+0.0"pp";-0.0"pp"';
 const MONEY = '#,##0';
 
 const border = {
@@ -259,12 +262,15 @@ function sheetFunnel(wb: ExcelJS.Workbook, r: ReportResult) {
 
 function sheetComparisons(wb: ExcelJS.Workbook, r: ReportResult) {
   const ws = wb.addWorksheet('Comparisons', { views: [{ showGridLines: false }] });
-  const span = 9;
+  const span = 11;
   titleRow(
     ws,
     'Comparisons — every lens in this report',
     span,
-    'Credible lenses first. Δ is relative lift vs the baseline row; "n/a" means the baseline was 0 and a percentage would be fabricated.'
+    'Credible lenses first. Δpp is the absolute percentage-point gap vs the baseline row; Δ% is the relative lift ' +
+      '("n/a" means the baseline was 0 and a percentage would be fabricated). "Session-weighted" lines compare each ' +
+      'webinar against its OWN baseline and weight the delta by that webinar\'s treated people, negatives kept — ' +
+      'pooled totals across lists are never used.'
   );
   let row = 4;
   for (const l of r.lenses) {
@@ -274,7 +280,9 @@ function sheetComparisons(wb: ExcelJS.Workbook, r: ReportResult) {
       row++;
       continue;
     }
-    row = headerRow(ws, row, ['Group', 'People', 'Showed', 'Show-up %', 'Show-up Δ', 'Bought', 'Buyer %', 'Buyer Δ', 'p-value']);
+    row = headerRow(ws, row, [
+      'Group', 'People', 'Showed', 'Show-up %', 'Show-up Δpp', 'Show-up Δ%', 'Bought', 'Buyer %', 'Buyer Δpp', 'Buyer Δ%', 'p-value',
+    ]);
     for (const g of l.rows) {
       const isBase = !!g.baseline;
       row = dataRow(
@@ -285,26 +293,29 @@ function sheetComparisons(wb: ExcelJS.Workbook, r: ReportResult) {
           g.n,
           g.showed,
           g.show_rate,
+          g.show_lift_abs != null ? g.show_lift_abs * 100 : 'n/a',
           g.show_lift ?? 'n/a',
           g.bought,
           g.buy_rate,
+          g.buy_lift_abs != null ? g.buy_lift_abs * 100 : 'n/a',
           g.buy_lift ?? 'n/a',
           g.significance?.p_value ?? '',
         ],
         {
           fillArgb: isBase ? SUB : l.credibility === 'causal' ? GREEN : undefined,
           bold: isBase,
-          formats: { 2: MONEY, 3: MONEY, 4: PCT, 5: DELTA, 6: MONEY, 7: PCT, 8: DELTA, 9: '0.000' },
+          formats: { 2: MONEY, 3: MONEY, 4: PCT, 5: DELTA_PP, 6: DELTA, 7: MONEY, 8: PCT, 9: DELTA_PP, 10: DELTA, 11: '0.000' },
         }
       );
     }
     for (const o of l.outcomes) {
       const sig = o.significance;
+      const rel = o.rel_lift == null ? 'n/a' : `${o.rel_lift >= 0 ? '+' : ''}${(o.rel_lift * 100).toFixed(1)}%`;
       row = noteRow(
         ws,
         row,
         `${o.label}: ${(o.a.rate * 100).toFixed(1)}% (${o.a.k}/${o.a.n}) vs ${(o.b.rate * 100).toFixed(1)}% (${o.b.k}/${o.b.n}) — ` +
-          `${o.abs_lift >= 0 ? '+' : ''}${(o.abs_lift * 100).toFixed(2)}pp, ` +
+          `${o.abs_lift >= 0 ? '+' : ''}${(o.abs_lift * 100).toFixed(2)}pp (${rel}), ` +
           `p=${sig.p_value == null ? 'n/a' : sig.p_value < 0.001 ? '<0.001' : sig.p_value.toFixed(3)}, ` +
           `${sig.significant ? 'significant' : 'NOT significant'}` +
           (sig.ci95 ? `, 95% CI ${(sig.ci95[0] * 100).toFixed(1)}pp to ${(sig.ci95[1] * 100).toFixed(1)}pp` : '') +
@@ -312,11 +323,24 @@ function sheetComparisons(wb: ExcelJS.Workbook, r: ReportResult) {
         span,
         34
       );
+      const norm = o.normalized;
+      if (norm) {
+        const nRel = norm.rel_lift == null ? 'n/a' : `${norm.rel_lift >= 0 ? '+' : ''}${(norm.rel_lift * 100).toFixed(1)}%`;
+        row = noteRow(
+          ws,
+          row,
+          `${o.label} — session-weighted: ${(norm.a_rate * 100).toFixed(1)}% vs ${(norm.b_rate * 100).toFixed(1)}% — ` +
+            `${norm.abs_lift >= 0 ? '+' : ''}${(norm.abs_lift * 100).toFixed(2)}pp (${nRel}), each webinar's delta weighted ` +
+            `by its treated people (negatives kept), over ${norm.sessions_used}/${norm.sessions_total} webinars (${Math.round(norm.coverage * 100)}% of people).`,
+          span,
+          22
+        );
+      }
     }
     row = noteRow(ws, row, `Why this label: ${l.credibility_note}${l.caveats.length ? ' ' + l.caveats.join(' ') : ''}`, span, 46);
     row++;
   }
-  widths(ws, [32, 10, 10, 12, 12, 10, 11, 11, 10]);
+  widths(ws, [32, 10, 10, 12, 12, 12, 10, 11, 11, 11, 10]);
 }
 
 function sheetPerWebinar(wb: ExcelJS.Workbook, r: ReportResult) {
@@ -545,8 +569,35 @@ function sheetRoi(wb: ExcelJS.Workbook, r: ReportResult) {
     { fillArgb: roi.incremental_credibility === 'causal' ? GREEN : AMBER, bold: true, formats: { 2: '0.00"x"' } }
   );
   row++;
+
+  // The audit line: incremental buyers must be a visible per-webinar addition
+  // (treated × delta, negatives kept), never a bare claimed total.
+  const lens = roi.incremental_lens ? r.lenses.find((l) => l.id === roi.incremental_lens) : null;
+  const norm = lens?.outcomes.find((o) => o.metric === 'bought')?.normalized;
+  if (norm?.strata?.length) {
+    row = sectionBar(ws, row, 'Per-webinar extra buyers — the addition behind the headline (negatives kept)', 4);
+    row = headerRow(ws, row, ['Webinar', 'Treated', 'Treated buy% − baseline buy%', 'Extra buyers']);
+    const sessions = new Map(r.sessions.map((s) => [s.key, s]));
+    for (const st of norm.strata) {
+      const s = sessions.get(st.key);
+      row = dataRow(
+        ws,
+        row,
+        [s ? `${s.date ?? ''}  ${s.topic}`.trim() : st.key, st.a_n, (st.a_rate - st.b_rate) * 100, st.extra],
+        { fillArgb: st.extra < 0 ? RED : undefined, formats: { 2: MONEY, 3: DELTA_PP, 4: '+#,##0.0;-#,##0.0' } }
+      );
+    }
+    row = dataRow(
+      ws,
+      row,
+      ['Total (= incremental buyers)', norm.treated_n, norm.abs_lift * 100, roi.incremental_buyers ?? ''],
+      { fillArgb: TOTAL, bold: true, formats: { 2: MONEY, 3: DELTA_PP, 4: '+#,##0.0;-#,##0.0' } }
+    );
+    row++;
+  }
+
   for (const n of roi.notes) row = noteRow(ws, row, n, 4, 30);
-  widths(ws, [26, 16, 56, 10]);
+  widths(ws, [40, 16, 56, 14]);
 }
 
 function sheetQuality(wb: ExcelJS.Workbook, q: QualityPanel, r: ReportResult) {

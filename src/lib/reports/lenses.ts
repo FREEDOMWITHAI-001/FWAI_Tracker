@@ -7,7 +7,7 @@
 // weeks) showed +0.6% lift and 1.4x ROI. L1 was measuring who answers the
 // phone, not what the call did. A biased lens must never be presented as proof.
 
-import { proportion, relativeLift, twoProportionTest } from './stats';
+import { normalizedComparison, proportion, relativeLift, twoProportionTest, type Stratum } from './stats';
 import type { Assumptions, Credibility, Fact, LensId, LensResult, LensRow, Outcome } from './types';
 import type { FactBuild } from './facts';
 
@@ -170,8 +170,33 @@ function outcomesFor(
       abs_lift: pa.rate - pb.rate,
       rel_lift: relativeLift(pa.rate, pb.rate),
       significance: twoProportionTest(pa, pb, opt),
+      normalized: normalizedComparison(sessionStrata(aFacts, bFacts, metric)),
     };
   });
+}
+
+// Split a cohort comparison by webinar, for the session-weighted rates.
+function sessionStrata(aFacts: Fact[], bFacts: Fact[], metric: Outcome['metric']): Stratum[] {
+  const bySession = new Map<string, Stratum>();
+  const bump = (fs: Fact[], side: 'a' | 'b') => {
+    for (const f of fs) {
+      let s = bySession.get(f.session_key);
+      if (!s) {
+        s = { key: f.session_key, aK: 0, aN: 0, bK: 0, bN: 0 };
+        bySession.set(f.session_key, s);
+      }
+      if (side === 'a') {
+        s.aN++;
+        if (f[metric]) s.aK++;
+      } else {
+        s.bN++;
+        if (f[metric]) s.bK++;
+      }
+    }
+  };
+  bump(aFacts, 'a');
+  bump(bFacts, 'b');
+  return [...bySession.values()];
 }
 
 function twoRowTable(aFacts: Fact[], bFacts: Fact[], aLabel: string, bLabel: string): LensRow[] {
@@ -190,6 +215,8 @@ function twoRowTable(aFacts: Fact[], bFacts: Fact[], aLabel: string, bLabel: str
       buy_rate,
       show_lift: baseline ? relativeLift(show_rate, baseline.show_rate) : null,
       buy_lift: baseline ? relativeLift(buy_rate, baseline.buy_rate) : null,
+      show_lift_abs: baseline ? show_rate - baseline.show_rate : null,
+      buy_lift_abs: baseline ? buy_rate - baseline.buy_rate : null,
       baseline: isBaseline,
     };
   };
@@ -327,6 +354,8 @@ function lensL5(ctx: Ctx): LensResult {
       buy_rate,
       show_lift: isBaseline ? null : relativeLift(show_rate, baseShow),
       buy_lift: isBaseline ? null : relativeLift(buy_rate, baseBuy),
+      show_lift_abs: isBaseline ? null : show_rate - baseShow,
+      buy_lift_abs: isBaseline ? null : buy_rate - baseBuy,
       baseline: isBaseline,
       significance: isBaseline
         ? undefined

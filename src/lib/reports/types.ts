@@ -203,6 +203,38 @@ export interface Proportion {
   rate: number; // k / n, 0 when n = 0
 }
 
+// Session-weighted (normalised) comparison, per the field SOP. Pooled rates
+// mix webinars: a giant, barely-dialled list drags the pooled baseline down
+// and fakes a bigger lift (Simpson's paradox). Instead, each webinar is
+// compared against ITS OWN baseline and the delta is weighted by that
+// webinar's treated (reached) count:
+//
+//   extra(webinar) = treated_n × (treated rate − baseline rate)   — negatives kept
+//   total extra    = Σ extra(webinar) = abs_lift × treated_n
+//
+// Only webinars containing both cohorts can contribute.
+export interface NormalizedStratum {
+  key: string; // session key — join to ReportResult.sessions for topic/date
+  a_n: number; // treated people in this webinar
+  a_rate: number;
+  b_rate: number;
+  extra: number; // a_n × (a_rate − b_rate), negatives kept
+}
+
+export interface NormalizedComparison {
+  a_rate: number; // treated rate over the webinars used
+  b_rate: number; // baseline rate reweighted to the treated mix
+  abs_lift: number; // a_rate - b_rate, in rate points
+  rel_lift: number | null; // null when the weighted baseline is 0
+  treated_n: number; // Σ a_n over the webinars used; abs_lift × treated_n = Σ extra
+  sessions_used: number; // webinars that contained both cohorts
+  sessions_total: number;
+  coverage: number; // share of people sitting in the webinars used
+  // Per-webinar audit trail so the total is a visible addition, not a claim.
+  // Optional so reports persisted before this field existed still render.
+  strata?: NormalizedStratum[];
+}
+
 export interface Outcome {
   metric: 'showed_up' | 'bought' | 'came_back';
   label: string;
@@ -211,6 +243,8 @@ export interface Outcome {
   abs_lift: number; // a.rate - b.rate
   rel_lift: number | null; // (a.rate - b.rate) / b.rate, null when baseline is 0
   significance: Significance;
+  // Optional so reports persisted before this field existed still render.
+  normalized?: NormalizedComparison | null;
 }
 
 export interface LensRow {
@@ -222,6 +256,10 @@ export interface LensRow {
   bought: number;
   buy_rate: number;
   buy_lift: number | null;
+  // Absolute gaps vs the baseline row, in rate points (Δpp next to the
+  // relative Δ%). Optional so old persisted results still render.
+  show_lift_abs?: number | null;
+  buy_lift_abs?: number | null;
   baseline?: boolean;
   significance?: Significance;
 }

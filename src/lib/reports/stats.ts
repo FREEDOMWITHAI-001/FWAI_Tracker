@@ -5,7 +5,7 @@
 // a webinar with 40 attendees produces confident-looking percentages that a
 // test will not support, so we warn loudly rather than printing a bare p-value.
 
-import type { Proportion, Significance } from './types';
+import type { NormalizedComparison, Proportion, Significance } from './types';
 
 const Z_80_POWER = 0.8416212; // one-sided z for 80% power
 
@@ -113,6 +113,52 @@ export function twoProportionTest(a: Proportion, b: Proportion, opt: TestOptions
     ci95: [round(ci95[0], 5), round(ci95[1], 5)],
     mde: mde == null ? null : round(mde, 5),
     warnings,
+  };
+}
+
+// One webinar's slice of a cohort comparison, for the normalised rates below.
+export interface Stratum {
+  key: string; // session key
+  aK: number;
+  aN: number;
+  bK: number;
+  bN: number;
+}
+
+// Session-weighted (normalised) rates, per the field SOP: compute each
+// cohort's rate INSIDE each webinar, take the delta against that webinar's
+// OWN baseline, and weight the delta by that webinar's treated (reached)
+// count — extra(webinar) = aN × (aRate − bRate), negatives kept, summed.
+// Equivalently: both cohort rates averaged with the treated count as the
+// shared weight, so abs_lift × treated_n reproduces Σ extra exactly. A giant,
+// barely-dialled list can no longer drag the pooled baseline down and fake a
+// bigger lift. Webinars missing either cohort contribute nothing — with fewer
+// than two usable webinars weighting is meaningless, so null is returned and
+// callers fall back to the pooled rates.
+export function normalizedComparison(strata: Stratum[]): NormalizedComparison | null {
+  const total = strata.reduce((t, s) => t + s.aN + s.bN, 0);
+  const usable = strata.filter((s) => s.aN > 0 && s.bN > 0);
+  if (!total || usable.length < 2) return null;
+  const treated = usable.reduce((t, s) => t + s.aN, 0);
+  if (!treated) return null;
+  const rows = usable.map((s) => {
+    const aRate = s.aK / s.aN;
+    const bRate = s.bK / s.bN;
+    return { key: s.key, a_n: s.aN, a_rate: aRate, b_rate: bRate, extra: s.aN * (aRate - bRate) };
+  });
+  const aRate = rows.reduce((t, r) => t + r.a_n * r.a_rate, 0) / treated;
+  const bRate = rows.reduce((t, r) => t + r.a_n * r.b_rate, 0) / treated;
+  const used = usable.reduce((t, s) => t + s.aN + s.bN, 0);
+  return {
+    a_rate: aRate,
+    b_rate: bRate,
+    abs_lift: aRate - bRate,
+    rel_lift: relativeLift(aRate, bRate),
+    treated_n: treated,
+    sessions_used: usable.length,
+    sessions_total: strata.length,
+    coverage: used / total,
+    strata: rows,
   };
 }
 
