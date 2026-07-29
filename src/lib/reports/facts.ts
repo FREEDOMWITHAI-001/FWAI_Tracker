@@ -762,6 +762,26 @@ export function buildFacts(
     stats.sales.matched_to_leads++;
   }
 
+  // ---------------------------------------------------- restored buyers (SOP)
+  // GHL re-tags buyers OFF the registration lists on purchase, so the leads
+  // export no longer contains them. A buyer the dialer called was provably on
+  // a list at call time (list bots only dial from lists), so they are restored
+  // into the registered cohort instead of being miscounted as "retargeted".
+  if (hasLeads) {
+    let restored = 0;
+    for (const [key, fs] of factIndex) {
+      if (leads.has(key)) continue;
+      if (!fs.some((f) => f.bought && f.dialled)) continue;
+      restored++;
+      for (const f of fs) f.registered = true;
+    }
+    if (restored)
+      notes.push(
+        `${restored} buyer(s) were dialled but are missing from the registration lists — restored into the registered cohort ` +
+          '(GHL re-tags buyers off lists on purchase; bots only dial from lists, so a dialled buyer was provably registered).'
+      );
+  }
+
   // ----------------------------------------------------------- AI/non-AI weeks
   let aiWeeks: string[];
   if (a.ai_weeks.length) {
