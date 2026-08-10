@@ -60,6 +60,15 @@ export const IconCalling = (p: P) => (
     <path d="M15 3h6M18 3v6" />
   </S>
 );
+// Token/credit meter — a gauge dial, matching the budget idea rather than any
+// vendor mark.
+export const IconOpenAI = (p: P) => (
+  <S {...p}>
+    <path d="M4 17a8 8 0 1 1 16 0" />
+    <path d="M12 17l4.5-4.5" />
+    <circle cx="12" cy="17" r="1.4" />
+  </S>
+);
 export const IconUpload = (p: P) => (
   <S {...p}>
     <path d="M12 16V4M8 8l4-4 4 4" />

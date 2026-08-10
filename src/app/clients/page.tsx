@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { api } from '@/lib/client';
-import { Pill, Loading, StatusSelect } from '@/components/ui';
+import { Pill, Loading, LoadError, StatusSelect } from '@/components/ui';
 import { ClientDialog } from '@/components/dialogs/client-dialog';
 import { IconInfo, IconPlus, IconRefresh, IconSearch } from '@/lib/icons';
 import type { ClientSummary } from '@/lib/types';
@@ -16,16 +16,26 @@ function ClientsInner() {
   const [q, setQ] = useState(params.get('q') ?? '');
   const [filter, setFilter] = useState('all');
   const [adding, setAdding] = useState(false);
+  const [error, setError] = useState('');
 
   const load = useCallback(async () => {
+    setError('');
     const c = await api.get<ClientSummary[]>('/api/clients');
     setClients(c);
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    load().catch(() => setLoading(false));
+  const reload = useCallback(() => {
+    setLoading(true);
+    load().catch((e) => {
+      setError(e?.message || 'Request failed');
+      setLoading(false);
+    });
   }, [load]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
 
   const list = clients.filter(
     (c) => (filter === 'all' || c.overall_status === filter) && c.name.toLowerCase().includes(q.toLowerCase())
@@ -43,6 +53,8 @@ function ClientsInner() {
           Add client
         </button>
       </div>
+
+      {error && <LoadError error={error} what="clients" onRetry={reload} />}
 
       <div className="tip">
         <IconInfo />
@@ -64,7 +76,7 @@ function ClientsInner() {
             { value: 'down', label: 'Down' },
           ]}
         />
-        <button className="btn" onClick={() => load()}>
+        <button className="btn" onClick={() => reload()}>
           <IconRefresh />
           Refresh
         </button>
@@ -122,7 +134,11 @@ function ClientsInner() {
               ) : (
                 <tr>
                   <td colSpan={7} style={{ color: 'var(--faint)', padding: '26px 20px' }}>
-                    {clients.length ? 'No clients match your filters.' : 'No clients yet — add your first one.'}
+                    {error
+                      ? 'Not loaded — see the error above.'
+                      : clients.length
+                        ? 'No clients match your filters.'
+                        : 'No clients yet — add your first one.'}
                   </td>
                 </tr>
               )}

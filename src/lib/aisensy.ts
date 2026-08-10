@@ -8,6 +8,11 @@ export interface AisensyConfig {
   enabled: boolean;
   api_url: string; // default AI Sensy Campaign API v2 endpoint
   campaign: string; // approved campaign/template name
+  // Optional second approved template for OpenAI low-credit alerts. Same
+  // integration and same API key — only the template differs, because the
+  // downtime template's 4th variable reads as "minutes" and a credit alert needs
+  // to say "% remaining". Blank falls back to `campaign`.
+  credits_campaign: string;
   username: string; // display name sent with the message
   threshold_min: number; // minutes down before alerting
   recovery: boolean; // also send a "back up" message
@@ -21,6 +26,7 @@ export function defaultAisensyConfig(): AisensyConfig {
     enabled: false,
     api_url: AISENSY_DEFAULT_URL,
     campaign: '',
+    credits_campaign: '',
     username: 'FWAI Tracker',
     threshold_min: 15,
     recovery: true,
@@ -60,10 +66,13 @@ function normalizePhone(p: string): string {
 
 export async function sendAisensy(
   cfg: AisensyConfig,
-  opts: { destination: string; userName?: string; templateParams: string[] }
+  opts: { destination: string; userName?: string; templateParams: string[]; campaign?: string }
 ) {
   if (!cfg.api_key_enc) throw new Error('AI Sensy API key is not set in Settings.');
-  if (!cfg.campaign) throw new Error('AI Sensy campaign/template name is not set in Settings.');
+  // An explicit campaign overrides the default one; falling back keeps every
+  // existing caller (which passes none) on exactly the template it used before.
+  const campaignName = opts.campaign?.trim() || cfg.campaign;
+  if (!campaignName) throw new Error('AI Sensy campaign/template name is not set in Settings.');
   const dest = normalizePhone(opts.destination);
   if (!dest) throw new Error('No valid recipient phone number.');
 
@@ -73,7 +82,7 @@ export async function sendAisensy(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       apiKey,
-      campaignName: cfg.campaign,
+      campaignName,
       destination: dest,
       userName: opts.userName || cfg.username || 'FWAI Tracker',
       templateParams: opts.templateParams,

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { api } from '@/lib/client';
-import { Pill, Loading } from '@/components/ui';
+import { Pill, Loading, LoadError } from '@/components/ui';
 import { IntegrationDialog } from '@/components/dialogs/integration-dialog';
 import { IconPlus } from '@/lib/icons';
 import type { Integration } from '@/lib/types';
@@ -13,7 +13,14 @@ interface Notifications {
   throttle: boolean;
 }
 
-const STATUS_LABEL: Record<string, string> = { healthy: 'Connected', warning: 'Token expired', down: 'Disconnected' };
+// These labels describe an OPERATOR'S OWN NOTE, not a verified connection.
+// Nothing in the app health-checks the service behind an integration row, so the
+// pill must not say "Connected" — that read as though the app had checked.
+// Services that really are wired up prove it where their credentials live: cloud
+// accounts on VM Status, Zoom accounts on Zoom Metrics (both show a real
+// last-synced time and sync error), AI Sensy via Send test below, and OpenAI on
+// OpenAI Track.
+const STATUS_LABEL: Record<string, string> = { healthy: 'Marked OK', warning: 'Needs attention', down: 'Marked down' };
 
 export default function SettingsPage() {
   const [notif, setNotif] = useState<Notifications>({ whatsapp: true, email_digest: true, throttle: true });
@@ -27,8 +34,10 @@ export default function SettingsPage() {
   const [aiMsg, setAiMsg] = useState('');
   const [testNum, setTestNum] = useState('');
   const [testMsg, setTestMsg] = useState('');
+  const [error, setError] = useState('');
 
   const load = useCallback(async () => {
+    setError('');
     const [settings, ints, aicfg] = await Promise.all([
       api.get<Record<string, any>>('/api/settings'),
       api.get<Integration[]>('/api/integrations'),
@@ -40,20 +49,31 @@ export default function SettingsPage() {
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    load().catch(() => setLoading(false));
+  // Settings failing quietly is its own trap: the AI Sensy card is only rendered
+  // when `ai` is non-null, so an unreachable database made a fully configured
+  // WhatsApp integration disappear from the page entirely.
+  const reload = useCallback(() => {
+    setLoading(true);
+    load().catch((e) => {
+      setError(e?.message || 'Request failed');
+      setLoading(false);
+    });
   }, [load]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
 
   const toggle = async (key: keyof Notifications) => {
     const next = { ...notif, [key]: !notif[key] };
     setNotif(next);
-    await api.put('/api/settings', { key: 'notifications', value: next }).catch(() => load());
+    await api.put('/api/settings', { key: 'notifications', value: next }).catch(() => reload());
   };
 
   const removeInt = async (id: string) => {
     if (!confirm('Remove this integration?')) return;
     await api.del(`/api/integrations/${id}`);
-    load();
+    reload();
   };
 
   const setAiField = (k: string, v: any) => setAi((p: any) => ({ ...p, [k]: v }));
@@ -85,6 +105,7 @@ export default function SettingsPage() {
   };
 
   if (loading) return <Loading label="Loading settings…" />;
+  if (error) return <LoadError error={error} what="settings" onRetry={reload} />;
 
   const Switch = ({ on, onClick }: { on: boolean; onClick: () => void }) => (
     <button className={`switch ${on ? 'on' : ''}`} onClick={onClick} aria-label="toggle">
@@ -147,6 +168,15 @@ export default function SettingsPage() {
               <input className="input" value={ai.campaign ?? ''} onChange={(e) => setAiField('campaign', e.target.value)} placeholder="downtime_alert" />
             </label>
             <label className="fld">
+              <span>Credits template (optional)</span>
+              <input
+                className="input"
+                value={ai.credits_campaign ?? ''}
+                onChange={(e) => setAiField('credits_campaign', e.target.value)}
+                placeholder="blank = use the template above"
+              />
+            </label>
+            <label className="fld">
               <span>API URL</span>
               <input className="input" value={ai.api_url ?? ''} onChange={(e) => setAiField('api_url', e.target.value)} placeholder="https://backend.aisensy.com/campaign/t1/api/v2" />
             </label>
@@ -168,6 +198,10 @@ export default function SettingsPage() {
             Your approved template should accept 4 variables in this order:{' '}
             <span className="mono">{'{{1}}=name, {{2}}=client, {{3}}=status, {{4}}=minutes'}</span>. Numbers use country
             code (e.g. <span className="mono">+91…</span>), set per client/project in their Edit form.
+            <br />
+            OpenAI Track sends the same four variables, but{' '}
+            <span className="mono">{'{{4}}'}</span> is <b>% remaining</b> rather than minutes — approve a second template
+            for it and name it above if the wording needs to match.
           </div>
 
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 14, flexWrap: 'wrap' }}>
@@ -189,7 +223,12 @@ export default function SettingsPage() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <h3>Integrations</h3>
-            <p>Services FWAI Tracker connects to.</p>
+            <p>
+              A manual reference list. These statuses are notes you set yourself — nothing here is health-checked, so a
+              row cannot tell you a service is really reachable. Live connection state lives with the credentials: cloud
+              accounts on <b>VM Status</b>, Zoom accounts on <b>Zoom Metrics</b> (both show last-synced and any sync
+              error), AI Sensy via <b>Send test</b> above, and keys on <b>OpenAI Track</b>.
+            </p>
           </div>
           <button className="btn btn-ghost" style={{ padding: '6px 11px', fontSize: 12.5 }} onClick={() => setAdding(true)}>
             <IconPlus /> Add

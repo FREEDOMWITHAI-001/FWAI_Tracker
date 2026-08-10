@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { api } from '@/lib/client';
-import { LineChart, Meter, Loading, Empty } from '@/components/ui';
+import { LineChart, Meter, Loading, LoadError, Empty } from '@/components/ui';
 import type { ClientSummary, App, Alert } from '@/lib/types';
 
 export default function ReportsPage() {
@@ -11,8 +11,10 @@ export default function ReportsPage() {
   const [alerts, setAlerts] = useState<(Alert & { client_name: string | null })[]>([]);
   const [series, setSeries] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   const load = useCallback(async () => {
+    setError('');
     const [c, a, al, s] = await Promise.all([
       api.get<ClientSummary[]>('/api/clients'),
       api.get<(App & { client_name: string })[]>('/api/apps'),
@@ -26,11 +28,22 @@ export default function ReportsPage() {
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    load().catch(() => setLoading(false));
+  const reload = useCallback(() => {
+    setLoading(true);
+    load().catch((e) => {
+      setError(e?.message || 'Request failed');
+      setLoading(false);
+    });
   }, [load]);
 
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
   if (loading) return <Loading label="Building reports…" />;
+  // Reliability figures computed from a half-failed fetch would be worse than no
+  // figures — a reader cannot tell 100% uptime from "we could not read the data".
+  if (error) return <LoadError error={error} what="reports" onRetry={reload} />;
 
   const summary = clients.map((c) => {
     const cApps = apps.filter((a) => a.client_id === c.id);

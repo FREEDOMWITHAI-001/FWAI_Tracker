@@ -1,5 +1,6 @@
 import { deleteById, maybeOne, updateById } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
+import { closeOrphanedIncidents } from '@/lib/alerts';
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -66,6 +67,11 @@ export async function DELETE(_req: Request, { params }: Ctx) {
   return guard(async () => {
     const { id } = await params;
     await deleteById('clients', id);
+    // Deleting a client cascades to its VMs, apps and OpenAI accounts, so any
+    // incident they had open is now orphaned. The alert rows themselves survive
+    // (client_id is set to null) — this closes them instead of leaving them
+    // active for a target that no longer exists.
+    await closeOrphanedIncidents();
     return ok({ deleted: true });
   });
 }

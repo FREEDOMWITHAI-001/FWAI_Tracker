@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, Fragment } from 'react';
 import { api } from '@/lib/client';
-import { Loading, StatusSelect } from '@/components/ui';
+import { Loading, LoadError, StatusSelect } from '@/components/ui';
 import { WebinarDialog } from '@/components/dialogs/webinar-dialog';
 import { ZoomAccountDialog } from '@/components/dialogs/zoom-account-dialog';
 import { IconPlus } from '@/lib/icons';
@@ -41,8 +41,10 @@ export default function ZoomPage() {
   const [connecting, setConnecting] = useState(false);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [zoomMsg, setZoomMsg] = useState('');
+  const [error, setError] = useState('');
 
   const load = useCallback(async () => {
+    setError('');
     const [w, c, za, zs] = await Promise.all([
       api.get<WRow[]>('/api/webinars'),
       api.get<Client[]>('/api/clients'),
@@ -73,7 +75,7 @@ export default function ZoomPage() {
   const removeAccount = async (id: string) => {
     if (!confirm('Disconnect this Zoom account? Its synced sessions will be removed.')) return;
     await api.del(`/api/zoom-accounts/${id}`);
-    load();
+    reload();
   };
 
   // Per-session participant drill-down (lazy-loaded on first expand).
@@ -140,14 +142,22 @@ export default function ZoomPage() {
     downloadCsv(`participants-${topic.replace(/[^a-z0-9]+/gi, '-').slice(0, 40)}.csv`, headers, rows);
   };
 
-  useEffect(() => {
-    load().catch(() => setLoading(false));
+  const reload = useCallback(() => {
+    setLoading(true);
+    load().catch((e) => {
+      setError(e?.message || 'Request failed');
+      setLoading(false);
+    });
   }, [load]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
 
   const remove = async (id: string) => {
     if (!confirm('Delete this webinar?')) return;
     await api.del(`/api/webinars/${id}`);
-    load();
+    reload();
   };
 
   const list = webinars.filter((w) => filter === 'all' || w.client_name === filter);
@@ -202,12 +212,17 @@ export default function ZoomPage() {
         </div>
       </div>
 
-      <div className="stats" style={{ gridTemplateColumns: 'repeat(4,1fr)' }}>
-        {stat('Zoom Sessions', zSessions.length, `${zWebinarCount} webinars · ${zMeetingCount} meetings`)}
-        {stat('Total Participants', zParticipants.toLocaleString(), 'across synced sessions')}
-        {stat('Avg / Session', zAvg.toLocaleString(), 'participants')}
-        {stat('Peak Session', zPeak.toLocaleString(), 'most participants')}
-      </div>
+      {error && <LoadError error={error} what="Zoom metrics" onRetry={reload} />}
+
+      {/* Hidden on error: four zeroes read as "no Zoom activity", not "not loaded". */}
+      {!error && (
+        <div className="stats" style={{ gridTemplateColumns: 'repeat(4,1fr)' }}>
+          {stat('Zoom Sessions', zSessions.length, `${zWebinarCount} webinars · ${zMeetingCount} meetings`)}
+          {stat('Total Participants', zParticipants.toLocaleString(), 'across synced sessions')}
+          {stat('Avg / Session', zAvg.toLocaleString(), 'participants')}
+          {stat('Peak Session', zPeak.toLocaleString(), 'most participants')}
+        </div>
+      )}
 
       <div className="card">
         <div className="card-h">

@@ -20,6 +20,7 @@ export async function PUT(req: Request) {
       enabled: !!body.enabled,
       api_url: body.api_url,
       campaign: body.campaign,
+      credits_campaign: body.credits_campaign ?? '',
       username: body.username,
       threshold_min: Number(body.threshold_min) || 15,
       recovery: !!body.recovery,

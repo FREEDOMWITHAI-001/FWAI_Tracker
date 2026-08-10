@@ -10,6 +10,7 @@ import {
   Pill,
   AlertItem,
   Loading,
+  LoadError,
   Empty,
 } from '@/components/ui';
 import {
@@ -31,8 +32,10 @@ export default function DashboardPage() {
   const [webinars, setWebinars] = useState<Webinar[]>([]);
   const [series, setSeries] = useState<number[]>([]);
   const [updated, setUpdated] = useState('');
+  const [error, setError] = useState('');
 
   const load = useCallback(async () => {
+    setError('');
     const [c, v, a, al, w, s] = await Promise.all([
       api.get<ClientSummary[]>('/api/clients'),
       api.get<VM[]>('/api/vms'),
@@ -51,11 +54,23 @@ export default function DashboardPage() {
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    load().catch(() => setLoading(false));
+  // A failed load must NOT fall through to the zero-state render below: empty
+  // stat cards and "All quiet" would describe a healthy idle fleet, which is the
+  // opposite of what just happened.
+  const reload = useCallback(() => {
+    setLoading(true);
+    load().catch((e) => {
+      setError(e?.message || 'Request failed');
+      setLoading(false);
+    });
   }, [load]);
 
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
   if (loading) return <Loading label="Loading dashboard…" />;
+  if (error) return <LoadError error={error} what="the dashboard" onRetry={reload} />;
 
   const activeVMs = vms.filter((v) => v.status !== 'down').length;
   const running = apps.filter((a) => a.status === 'healthy').length;
