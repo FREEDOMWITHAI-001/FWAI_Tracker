@@ -78,6 +78,20 @@ npm run migrate -- --dry    # show what would run, change nothing
 Adding a schema change means dropping a new `migration_NN_name.sql` into `migrations/` and
 re-running the command. There is no SQL to paste into a console by hand.
 
+**Deploys migrate themselves.** `npm run build` runs `migrate --if-configured` before
+`next build`, so the schema is applied wherever the build has `DATABASE_URL` — a deploy is the
+only moment that reliably has both the new `.sql` files and the production connection string in
+one place. Relying on someone to remember to point a laptop at production is what previously left
+a deployed build asking for a table its database had never been given (`relation
+"openai_accounts" does not exist`).
+
+- No `DATABASE_URL` at all → migrations are skipped and the build proceeds (preview builds, CI).
+- `DATABASE_URL` set but unreachable, or a migration that fails → the build fails, rather than
+  shipping code ahead of its schema.
+
+If your build environment genuinely cannot reach the database (IP allowlist), run `npm run
+migrate` from somewhere that can before promoting the deploy.
+
 ### 3. Run it
 
 ```bash
