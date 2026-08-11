@@ -32,10 +32,13 @@ export function AlertDialog({
     severity: initial?.severity ?? 'warning',
     title: initial?.title ?? '',
     description: initial?.description ?? '',
-    whatsapp_sent: initial?.whatsapp_sent ?? false,
     status: initial?.status ?? 'active',
   });
+  // Asks the server to actually message the client contact — not a note that
+  // someone already did.
+  const [send, setSend] = useState(false);
   const [err, setErr] = useState('');
+  const [warn, setWarn] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k: string, v: any) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -45,8 +48,20 @@ export function AlertDialog({
     setErr('');
     try {
       const body = { ...form, title: form.title.trim(), client_id: form.client_id || null };
-      if (editing) await api.patch(`/api/alerts/${initial!.id}`, body);
-      else await api.post('/api/alerts', body);
+      if (editing) {
+        await api.patch(`/api/alerts/${initial!.id}`, body);
+      } else {
+        const created = await api.post<Alert>('/api/alerts', { ...body, send_whatsapp: send });
+        if (send && created.whatsapp_error) {
+          // The alert WAS raised; only the WhatsApp leg failed. Refresh the list
+          // but hold the dialog open, otherwise the reason disappears on close
+          // and it looks like the message went out.
+          onSaved();
+          setWarn(created.whatsapp_error);
+          setBusy(false);
+          return;
+        }
+      }
       onSaved();
       onClose();
     } catch (e: any) {
@@ -60,17 +75,24 @@ export function AlertDialog({
       title={editing ? 'Edit alert' : 'Raise alert'}
       onClose={onClose}
       footer={
-        <>
-          <button className="btn btn-ghost" onClick={onClose} disabled={busy}>
-            Cancel
+        warn ? (
+          <button className="btn btn-primary" onClick={onClose}>
+            Close
           </button>
-          <button className="btn btn-primary" onClick={save} disabled={busy}>
-            {busy ? 'Saving…' : editing ? 'Save changes' : 'Raise alert'}
-          </button>
-        </>
+        ) : (
+          <>
+            <button className="btn btn-ghost" onClick={onClose} disabled={busy}>
+              Cancel
+            </button>
+            <button className="btn btn-primary" onClick={save} disabled={busy}>
+              {busy ? (send ? 'Sending…' : 'Saving…') : editing ? 'Save changes' : 'Raise alert'}
+            </button>
+          </>
+        )
       }
     >
       {err && <div className="form-err">{err}</div>}
+      {warn && <div className="form-warn">Alert raised, but WhatsApp was not delivered: {warn}</div>}
       <Field label="Title">
         <input className="input" value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="VM unreachable" autoFocus />
       </Field>
@@ -99,18 +121,35 @@ export function AlertDialog({
         <Field label="Status">
           <StatusSelect value={form.status} onChange={(v) => set('status', v)} options={STATUSES} />
         </Field>
-        <Field label="WhatsApp delivery">
-          <button
-            type="button"
-            className={`switch ${form.whatsapp_sent ? 'on' : ''}`}
-            onClick={() => set('whatsapp_sent', !form.whatsapp_sent)}
-            style={{ marginTop: 4 }}
-            aria-label="Toggle WhatsApp delivery"
-          >
-            <i />
-          </button>
-        </Field>
+        {editing ? (
+          // Read-only on an existing alert: the column is written by the server
+          // when a message is actually attempted, so it isn't ours to toggle.
+          <Field label="WhatsApp delivery">
+            <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>
+              {initial!.whatsapp_sent
+                ? `Sent${initial!.whatsapp_sent_at ? ` · ${new Date(initial!.whatsapp_sent_at).toLocaleString()}` : ''}`
+                : initial!.whatsapp_error || 'Not sent'}
+            </div>
+          </Field>
+        ) : (
+          <Field label="Send WhatsApp now">
+            <button
+              type="button"
+              className={`switch ${send ? 'on' : ''}`}
+              onClick={() => setSend((v) => !v)}
+              style={{ marginTop: 4 }}
+              aria-label="Send WhatsApp now"
+            >
+              <i />
+            </button>
+          </Field>
+        )}
       </div>
+      {!editing && send && (
+        <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: -4 }}>
+          Messages the selected client&apos;s alert contact via AI Sensy. Needs WhatsApp configured in Settings.
+        </div>
+      )}
     </Modal>
   );
 }

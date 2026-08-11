@@ -105,10 +105,52 @@ export interface Alert {
   severity: Severity;
   title: string;
   description: string | null;
+  /** True only when AI Sensy accepted a message for this alert. Server-written. */
   whatsapp_sent: boolean;
+  whatsapp_sent_at: string | null;
+  /** Why no message went out; null when it did. */
+  whatsapp_error: string | null;
+  /** Which monitored thing raised this, or 'manual' for an operator alert. */
+  source_kind: 'vm' | 'app' | 'openai' | 'manual' | null;
+  source_id: string | null;
   status: AlertStatus;
   created_at: string;
   resolved_at: string | null;
+}
+
+/**
+ * A client's OpenAI API account, tracked as a token budget: `allocated_tokens`
+ * is what the ops team granted, `used_tokens` what has been consumed. The key
+ * itself never reaches the browser — `has_key` and `label` stand in for it.
+ */
+export interface OpenAiAccount {
+  id: string;
+  client_id: string;
+  name: string;
+  /** Masked hint for the stored key, e.g. "sk-…4f2a". Never the key itself. */
+  label: string | null;
+  org_id: string | null;
+  project_id: string | null;
+  allocated_tokens: number;
+  used_tokens: number;
+  used_source: 'manual' | 'api';
+  low_threshold_pct: number;
+  critical_threshold_pct: number;
+  status: Status;
+  alerted: boolean;
+  last_alerted_at: string | null;
+  low_since: string | null;
+  alert_name: string | null;
+  alert_phone: string | null;
+  last_checked_at: string | null;
+  last_check_error: string | null;
+  created_at: string;
+  has_key: boolean;
+  // Derived server-side so the list doesn't recompute them per render.
+  remaining_tokens: number;
+  remaining_pct: number;
+  /** False when no allocation is set — nothing to be a percentage of. */
+  budgeted: boolean;
 }
 
 export interface WebinarStage {

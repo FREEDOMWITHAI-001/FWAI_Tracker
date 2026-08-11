@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/client';
-import { Pill, Loading, StatusSelect, BarGauge, Tag } from '@/components/ui';
+import { Pill, Loading, LoadError, StatusSelect, BarGauge, Tag } from '@/components/ui';
 import { VMDialog } from '@/components/dialogs/vm-dialog';
 import { CloudAccountDialog } from '@/components/dialogs/cloud-account-dialog';
 import { IconPlus, IconRefresh } from '@/lib/icons';
@@ -28,9 +28,11 @@ export default function VMsPage() {
   const [syncing, setSyncing] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null); // expanded cloud account
   const [expandedVm, setExpandedVm] = useState<string | null>(null); // expanded VM (shows its projects)
+  const [error, setError] = useState('');
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(async () => {
+    setError('');
     const [v, c, a, ap] = await Promise.all([
       api.get<VMRow[]>('/api/vms'),
       api.get<Client[]>('/api/clients'),
@@ -44,9 +46,20 @@ export default function VMsPage() {
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    load();
+  // This previously called `load()` bare. On a failed fetch the rejection went
+  // unhandled and `loading` was never cleared, so the page sat on its spinner
+  // indefinitely with no indication anything had gone wrong.
+  const reload = useCallback(() => {
+    setLoading(true);
+    load().catch((e) => {
+      setError(e?.message || 'Request failed');
+      setLoading(false);
+    });
   }, [load]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
 
   const checkAll = useCallback(async () => {
     setChecking(true);
@@ -75,7 +88,7 @@ export default function VMsPage() {
   const remove = async (id: string) => {
     if (!confirm('Delete this VM?')) return;
     await api.del(`/api/vms/${id}`);
-    load();
+    reload();
   };
 
   // Cloud account actions — connect a read-only service account, pull its
@@ -109,7 +122,7 @@ export default function VMsPage() {
   const removeAccount = async (id: string) => {
     if (!confirm('Remove this cloud account and the VMs imported from it?')) return;
     await api.del(`/api/cloud-accounts/${id}`);
-    load();
+    reload();
   };
 
   const toggleVm = (id: string) => setExpandedVm((cur) => (cur === id ? null : id));
@@ -243,7 +256,11 @@ export default function VMsPage() {
         </div>
       </div>
 
-      {(note || (withChecks === 0 && accounts.length === 0)) && (
+      {error && <LoadError error={error} what="VM status" onRetry={reload} />}
+
+      {/* Suppressed while `error` is set: "No VM is set up yet" is a statement
+          about the fleet, and we have not been able to read the fleet. */}
+      {!error && (note || (withChecks === 0 && accounts.length === 0)) && (
         <div className="tip" style={{ background: 'var(--soft)', borderColor: 'var(--border)', color: 'var(--muted)' }}>
           {withChecks === 0 && accounts.length === 0
             ? 'No VM is set up yet — click Add VM, enter Host/IP + SSH username + .pem key to track CPU, Memory and Disk. (Or connect a cloud account below.)'

@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/client';
-import { Pill, Gauge, MetricHistoryChart, ResponseHistoryChart, Loading, Empty, StatusSelect, ClientTag, Tag } from '@/components/ui';
+import { Pill, Gauge, MetricHistoryChart, ResponseHistoryChart, Loading, LoadError, Empty, StatusSelect, Tag } from '@/components/ui';
 import { IconChevronLeft, IconRefresh, IconPlus } from '@/lib/icons';
 import { AppDialog } from '@/components/dialogs/app-dialog';
 import { APP_STATUS_LABEL, type VM, type VmMetric, type App } from '@/lib/types';
@@ -29,6 +29,7 @@ export default function VMDetailPage() {
   const [range, setRange] = useState('1d');
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [error, setError] = useState('');
   const [checking, setChecking] = useState(false);
   const [note, setNote] = useState('');
   const [apps, setApps] = useState<(App & { client_name: string })[]>([]);
@@ -53,11 +54,15 @@ export default function VMDetailPage() {
   );
 
   const load = useCallback(async () => {
+    setError('');
     try {
       const [v] = await Promise.all([api.get<VMRow>(`/api/vms/${id}`), loadMetrics(range), loadApps()]);
       setVm(v);
-    } catch {
-      setNotFound(true);
+      setNotFound(false);
+    } catch (e: any) {
+      const msg = e?.message || 'Request failed';
+      if (/not found/i.test(msg)) setNotFound(true);
+      else setError(msg);
     } finally {
       setLoading(false);
     }
@@ -113,6 +118,15 @@ export default function VMDetailPage() {
   };
 
   if (loading) return <Loading label="Loading VM…" />;
+  if (error)
+    return (
+      <div className="page">
+        <Link className="crumb" href="/vms">
+          <IconChevronLeft /> Back to VM status
+        </Link>
+        <LoadError error={error} what="this VM" onRetry={load} />
+      </div>
+    );
   if (notFound || !vm)
     return (
       <div className="page">

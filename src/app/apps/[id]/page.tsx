@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/client';
-import { Pill, ResponseHistoryChart, Loading, Empty, StatusSelect, ClientTag, Tag } from '@/components/ui';
+import { Pill, ResponseHistoryChart, Loading, LoadError, Empty, StatusSelect, ClientTag, Tag } from '@/components/ui';
 import { IconChevronLeft, IconRefresh } from '@/lib/icons';
 import { APP_STATUS_LABEL, type App, type AppMetric } from '@/lib/types';
 
@@ -28,6 +28,7 @@ export default function AppDetailPage() {
   const [range, setRange] = useState('1d');
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [error, setError] = useState('');
   const [checking, setChecking] = useState(false);
   const [note, setNote] = useState('');
 
@@ -40,11 +41,15 @@ export default function AppDetailPage() {
   );
 
   const load = useCallback(async () => {
+    setError('');
     try {
       const [a] = await Promise.all([api.get<AppRow>(`/api/apps/${id}`), loadMetrics(range)]);
       setApp(a);
-    } catch {
-      setNotFound(true);
+      setNotFound(false);
+    } catch (e: any) {
+      const msg = e?.message || 'Request failed';
+      if (/not found/i.test(msg)) setNotFound(true);
+      else setError(msg);
     } finally {
       setLoading(false);
     }
@@ -95,6 +100,15 @@ export default function AppDetailPage() {
   };
 
   if (loading) return <Loading label="Loading application…" />;
+  if (error)
+    return (
+      <div className="page">
+        <Link className="crumb" href="/clients">
+          <IconChevronLeft /> Back
+        </Link>
+        <LoadError error={error} what="this application" onRetry={load} />
+      </div>
+    );
   if (notFound || !app)
     return (
       <div className="page">

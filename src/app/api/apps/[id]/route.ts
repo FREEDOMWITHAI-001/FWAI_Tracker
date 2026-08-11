@@ -1,5 +1,6 @@
 import { deleteById, maybeOne, updateById } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
+import { closeOrphanedIncidents } from '@/lib/alerts';
 
 type Ctx = { params: Promise<{ id: string }> };
 const APP_FIELDS = ['vm_id', 'name', 'type', 'host', 'status', 'resp_ms', 'health', 'uptime', 'check_url', 'check_host', 'check_port', 'alert_name', 'alert_phone', 'tag'] as const;
@@ -36,6 +37,9 @@ export async function DELETE(_req: Request, { params }: Ctx) {
   return guard(async () => {
     const { id } = await params;
     await deleteById('apps', id);
+    // Its open incident can no longer resolve itself — the alerter only iterates
+    // rows that still exist.
+    await closeOrphanedIncidents();
     return ok({ deleted: true });
   });
 }

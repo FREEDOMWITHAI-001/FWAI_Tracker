@@ -139,24 +139,21 @@ create table if not exists public.uptime_samples (
 );
 
 -- ---------------------------------------------------------------------------
--- Seed the integration rows + default notification settings (optional but
--- harmless on an empty start; comment out if you want a truly blank slate).
+-- Seed the default notification settings.
 -- ---------------------------------------------------------------------------
--- Seed the default integration rows, once. `on conflict do nothing` does NOT
--- make this idempotent on its own: id defaults to gen_random_uuid(), so every
--- run produces a brand-new key that conflicts with nothing and inserts a fourth
--- copy. Guarding on the name is what actually makes a re-run a no-op.
-insert into public.integrations (name, detail, status, sort_order)
-select v.name, v.detail, v.status, v.sort_order
-from (values
-  ('AWS (EC2)',          'Read-only · ap-south-1',            'healthy', 1),
-  ('Zoom',               'Server-to-Server OAuth',            'healthy', 2),
-  ('WhatsApp Business',  'Twilio · Ops group',                'healthy', 3),
-  ('GoHighLevel',        'Webinar email delivery',            'warning', 4)
-) as v(name, detail, status, sort_order)
-where not exists (
-  select 1 from public.integrations i where i.name = v.name
-);
+-- NO integration rows are seeded, deliberately.
+--
+-- This table is an operator-maintained note board: `status` is a value somebody
+-- types, and nothing in the app ever health-checks the service behind a row.
+-- Seeding it therefore put four rows on every fresh install asserting states
+-- nobody had verified — two of which ("WhatsApp Business · Twilio",
+-- "GoHighLevel") named services this codebase has no implementation of at all,
+-- while the WhatsApp that IS implemented goes through AI Sensy. A brand-new
+-- install showed four connected-looking services before it had a single client.
+--
+-- An empty list is honest, and the Settings page already renders it as
+-- "No integrations configured." See migration_19 for the matching cleanup of
+-- installs that already received the seed.
 
 insert into public.app_settings (key, value) values
   ('notifications', '{"whatsapp": true, "email_digest": true, "throttle": true}'::jsonb)

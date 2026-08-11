@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/client';
-import { Loading, Modal, Field, StatusSelect } from '@/components/ui';
+import { Loading, LoadError, Modal, Field, StatusSelect } from '@/components/ui';
 import { IconPlus } from '@/lib/icons';
 import type { Client } from '@/lib/types';
 import type { ReportTemplate } from '@/lib/reports/types';
@@ -40,8 +40,10 @@ export default function CallingReportsPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState('');
 
   const load = useCallback(async () => {
+    setError('');
     const [r, c, t] = await Promise.all([
       api.get<ReportRow[]>('/api/calling-reports'),
       api.get<Client[]>('/api/clients'),
@@ -53,9 +55,17 @@ export default function CallingReportsPage() {
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    load().catch(() => setLoading(false));
+  const reload = useCallback(() => {
+    setLoading(true);
+    load().catch((e) => {
+      setError(e?.message || 'Request failed');
+      setLoading(false);
+    });
   }, [load]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
 
   const list = reports.filter((r) => filter === 'all' || r.client_name === filter);
   const clientNames = [...new Set(reports.map((r) => r.client_name))];
@@ -64,7 +74,7 @@ export default function CallingReportsPage() {
   const remove = async (id: string, name: string) => {
     if (!confirm(`Delete "${name}"? Its uploads and computed facts go with it.`)) return;
     await api.del(`/api/calling-reports/${id}`);
-    load();
+    reload();
   };
 
   const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : '—');
@@ -90,6 +100,8 @@ export default function CallingReportsPage() {
           </button>
         </div>
       </div>
+
+      {error && <LoadError error={error} what="calling reports" onRetry={reload} />}
 
       <div className="card">
         <div className="card-h">
@@ -160,7 +172,9 @@ export default function CallingReportsPage() {
               ) : (
                 <tr>
                   <td colSpan={8} style={{ color: 'var(--faint)', padding: '26px 20px' }}>
-                    No calling reports yet. Click <b>New report</b> — you need a client first.
+                    {error
+                      ? 'Not loaded — see the error above.'
+                      : 'No calling reports yet. Click New report — you need a client first.'}
                   </td>
                 </tr>
               )}

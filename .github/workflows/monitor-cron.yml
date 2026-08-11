@@ -1,0 +1,70 @@
+# Five-minute monitoring trigger.
+#
+# Vercel's Hobby plan caps crons at one run per day, so vercel.json is pinned to
+# "0 0 * * *" and exists only as a daily backstop. The in-process scheduler in
+# src/lib/scheduler.ts cannot cover the gap either — setInterval does not survive
+# a serverless invocation. This workflow is therefore the real automation in
+# production: it calls the same endpoint Vercel Cron would call, with the same
+# bearer secret, on the cadence the dashboard was designed around.
+#
+# CAVEAT: GitHub's scheduler is best-effort. Runs are queued, can arrive several
+# minutes late under load, and may be skipped entirely during peak periods.
+# That is acceptable for "a VM has been down a while" but is NOT a hard 5-minute
+# guarantee. If you need one, point cron-job.org (or any uptime pinger) at the
+# same URL with the same header instead — the endpoint does not care who calls it.
+#
+# GitHub also disables scheduled workflows on public repos after 60 days with no
+# commits. If checks go quiet, re-enable this workflow in the Actions tab.
+
+name: Monitoring cron
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # lets you fire a check by hand from the Actions tab
+
+# A slow probe run must not pile up behind the next tick.
+concurrency:
+  group: monitor-cron
+  cancel-in-progress: false
+
+jobs:
+  check-all:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger /api/cron/check-all
+        env:
+          BASE_URL: ${{ vars.MONITOR_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE_URL:-}" ]; then
+            echo "::error::Repository variable MONITOR_BASE_URL is not set (e.g. https://your-app.vercel.app)"
+            exit 1
+          fi
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::Repository secret CRON_SECRET is not set"
+            exit 1
+          fi
+
+          # --max-time must exceed the route's maxDuration = 60.
+          body=$(mktemp)
+          code=$(curl -sS --max-time 90 \
+                   -o "$body" -w '%{http_code}' \
+                   -H "Authorization: Bearer ${CRON_SECRET}" \
+                   "${BASE_URL%/}/api/cron/check-all") || {
+            echo "::error::Request to ${BASE_URL%/}/api/cron/check-all failed"
+            exit 1
+          }
+
+          echo "HTTP $code"
+          # The body reports what actually ran (vms_checked, openai_checked, …);
+          # it carries no secrets, so logging it is safe and makes a failed run
+          # diagnosable from the Actions log alone.
+          cat "$body"; echo
+
+          if [ "$code" != "200" ]; then
+            echo "::error::check-all returned HTTP $code"
+            exit 1
+          fi

@@ -6,6 +6,7 @@ import {
   IconAlertTriangle,
   IconAlertCircle,
   IconInfo,
+  IconRefresh,
   IconWhatsApp,
   IconX,
 } from '@/lib/icons';
@@ -259,6 +260,48 @@ export function Loading({ label = 'Loading…' }: { label?: string }) {
     <div className="loading">
       <span className="spinner" />
       {label}
+    </div>
+  );
+}
+
+/**
+ * The "we could not load this" state.
+ *
+ * Every list page used to swallow a failed fetch with `.catch(() => setLoading(false))`,
+ * which left the initial empty state on screen: a database outage rendered as
+ * "Total Clients 0" and "No alerts. All quiet." A monitoring tool reporting all
+ * clear while it cannot reach its own database is worse than one showing nothing,
+ * so a load failure now has to look like a failure — never like zero records.
+ *
+ * `what` names the screen ("the dashboard"), so a page composed of several
+ * fetches still says which one broke.
+ */
+export function LoadError({
+  error,
+  what = 'this page',
+  onRetry,
+}: {
+  error: string;
+  what?: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <div className="load-error" role="alert">
+      <div className="le-head">
+        <IconAlertTriangle />
+        <b>Could not load {what}</b>
+      </div>
+      <p>
+        This is <b>not</b> an empty system — the data could not be read, so nothing below can be trusted. Check that the
+        database is reachable and the server is running.
+      </p>
+      <div className="le-msg mono">{error}</div>
+      {onRetry && (
+        <button className="btn" onClick={onRetry} style={{ marginTop: 12 }}>
+          <IconRefresh />
+          Try again
+        </button>
+      )}
     </div>
   );
 }

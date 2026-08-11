@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { api } from '@/lib/client';
-import { Pill, StatCard, LineChart, AlertItem, Loading, Empty, BarGauge } from '@/components/ui';
+import { Pill, StatCard, LineChart, AlertItem, Loading, LoadError, Empty, BarGauge } from '@/components/ui';
 import { ClientDialog } from '@/components/dialogs/client-dialog';
 import { VMDialog } from '@/components/dialogs/vm-dialog';
 import { AppDialog } from '@/components/dialogs/app-dialog';
@@ -26,6 +26,9 @@ export default function ClientDetailPage() {
   const [series, setSeries] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  // A 404 and "the database is unreachable" are different facts. Reporting the
+  // second as "Client not found" sends someone looking for a deleted record.
+  const [error, setError] = useState('');
 
   const [editClient, setEditClient] = useState(false);
   const [addVM, setAddVM] = useState(false);
@@ -35,6 +38,7 @@ export default function ClientDetailPage() {
   const [checkingApp, setCheckingApp] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setError('');
     try {
       const [c, s] = await Promise.all([
         api.get<ClientFull>(`/api/clients/${id}`),
@@ -42,8 +46,11 @@ export default function ClientDetailPage() {
       ]);
       setClient(c);
       setSeries(s);
-    } catch {
-      setNotFound(true);
+      setNotFound(false);
+    } catch (e: any) {
+      const msg = e?.message || 'Request failed';
+      if (/not found/i.test(msg)) setNotFound(true);
+      else setError(msg);
     } finally {
       setLoading(false);
     }
@@ -81,6 +88,15 @@ export default function ClientDetailPage() {
   };
 
   if (loading) return <Loading label="Loading client…" />;
+  if (error)
+    return (
+      <div className="page">
+        <Link className="crumb" href="/clients">
+          <IconChevronLeft /> Back
+        </Link>
+        <LoadError error={error} what="this client" onRetry={load} />
+      </div>
+    );
   if (notFound || !client)
     return (
       <div className="page">

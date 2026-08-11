@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { api } from '@/lib/client';
-import { AlertItem, Loading, Empty } from '@/components/ui';
+import { AlertItem, Loading, LoadError, Empty } from '@/components/ui';
 import { AlertDialog } from '@/components/dialogs/alert-dialog';
 import { IconPlus, IconWhatsApp } from '@/lib/icons';
 import type { Alert, Client } from '@/lib/types';
@@ -15,30 +15,45 @@ export default function AlertsPage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'active' | 'resolved'>('active');
   const [adding, setAdding] = useState(false);
+  const [error, setError] = useState('');
 
   const load = useCallback(async () => {
+    setError('');
     const [a, c] = await Promise.all([api.get<ARow[]>('/api/alerts'), api.get<Client[]>('/api/clients')]);
     setAlerts(a);
     setClients(c);
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    load().catch(() => setLoading(false));
+  // "Nothing here." on the Alerts page is the single most dangerous empty state
+  // in the app — it reads as "no incidents" when it may mean "cannot reach the
+  // incident log at all".
+  const reload = useCallback(() => {
+    setLoading(true);
+    load().catch((e) => {
+      setError(e?.message || 'Request failed');
+      setLoading(false);
+    });
   }, [load]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
 
   const setStatus = async (id: string, status: 'active' | 'resolved') => {
     await api.patch(`/api/alerts/${id}`, { status });
-    load();
+    reload();
   };
   const remove = async (id: string) => {
     if (!confirm('Delete this alert?')) return;
     await api.del(`/api/alerts/${id}`);
-    load();
+    reload();
   };
 
   const shown = alerts.filter((a) => a.status === tab);
-  const waHistory = alerts.filter((a) => a.whatsapp_sent);
+  // Attempts, not just successes: a message that never went out is the case an
+  // operator most needs to see here.
+  const waHistory = alerts.filter((a) => a.whatsapp_sent || a.whatsapp_error);
 
   return (
     <div className="page">
@@ -52,6 +67,8 @@ export default function AlertsPage() {
           Raise alert
         </button>
       </div>
+
+      {error && <LoadError error={error} what="alerts" onRetry={reload} />}
 
       <div className="tabs">
         <button className={tab === 'active' ? 'on' : ''} onClick={() => setTab('active')}>
@@ -94,7 +111,7 @@ export default function AlertsPage() {
                 />
               ))
             ) : (
-              <Empty>Nothing here.</Empty>
+              <Empty>{error ? 'Not loaded — see the error above.' : 'Nothing here.'}</Empty>
             )}
           </div>
         </div>
@@ -110,20 +127,36 @@ export default function AlertsPage() {
             {waHistory.length ? (
               waHistory.map((a) => (
                 <div className="alert" key={a.id}>
-                  <div className="sev info" style={{ background: 'var(--wa-50)', color: 'var(--wa)' }}>
+                  <div
+                    className="sev info"
+                    style={
+                      a.whatsapp_sent
+                        ? { background: 'var(--wa-50)', color: 'var(--wa)' }
+                        : { background: 'var(--red-50)', color: 'var(--red)' }
+                    }
+                  >
                     <IconWhatsApp />
                   </div>
                   <div className="body">
                     <div className="ttl">{a.title}</div>
-                    <div className="desc">Delivered to Ops group · {a.client_name || 'fleet'}</div>
+                    <div className="desc" style={a.whatsapp_sent ? undefined : { color: 'var(--red)' }}>
+                      {a.whatsapp_sent
+                        ? `Delivered to ${a.client_name || 'fleet'} contact`
+                        : `Not delivered — ${a.whatsapp_error}`}
+                    </div>
                   </div>
                   <div className="time">
-                    <span>{new Date(a.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    <span>
+                      {new Date(a.whatsapp_sent_at ?? a.created_at).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
                   </div>
                 </div>
               ))
             ) : (
-              <Empty>No WhatsApp deliveries yet.</Empty>
+              <Empty>{error ? 'Not loaded — see the error above.' : 'No WhatsApp deliveries yet.'}</Empty>
             )}
           </div>
         </div>
