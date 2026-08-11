@@ -75,11 +75,21 @@ export async function POST(req: Request) {
     if (!Number.isFinite(allocated) || allocated < 0) return bad('allocated_tokens must be 0 or more');
     if (!Number.isFinite(used) || used < 0) return bad('used_tokens must be 0 or more');
 
+    const apiKey = body.api_key === undefined ? '' : String(body.api_key).trim();
+    const projectId = body.project_id?.trim() || null;
+    // A key without a project id would make the usage pull organization-wide, so
+    // every account sharing that admin key would report the same consumption and
+    // trip the same threshold together. Refused at the door rather than silently
+    // producing figures that belong to somebody else.
+    if (apiKey && !projectId) {
+      return bad('An OpenAI project ID is required when an admin key is stored — usage is scoped per project.');
+    }
+
     const row: Record<string, unknown> = {
       client_id,
       name: String(name).trim(),
       org_id: body.org_id?.trim() || null,
-      project_id: body.project_id?.trim() || null,
+      project_id: projectId,
       allocated_tokens: Math.round(allocated),
       used_tokens: Math.round(used),
       low_threshold_pct: Math.round(low),
@@ -96,14 +106,13 @@ export async function POST(req: Request) {
       critical_threshold_pct: critical,
     }).status;
 
-    if (body.api_key && String(body.api_key).trim()) {
-      const key = String(body.api_key).trim();
+    if (apiKey) {
       try {
-        row.credentials_encrypted = encrypt(key);
+        row.credentials_encrypted = encrypt(apiKey);
       } catch (e) {
         return bad(e instanceof Error ? e.message : 'encryption failed', 500);
       }
-      row.label = keyLabel(key);
+      row.label = keyLabel(apiKey);
       // A stored key means usage can be pulled; the first check flips this to
       // 'api' on success and leaves it alone on failure.
       row.used_source = 'manual';
