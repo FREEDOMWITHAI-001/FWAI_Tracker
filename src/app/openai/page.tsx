@@ -122,8 +122,9 @@ export default function OpenAiTrackPage() {
         <div>
           <h1>OpenAI Track</h1>
           <p>
-            Token allocation vs usage per client. When remaining credit crosses a threshold, the client&apos;s mobile
-            number gets a WhatsApp through the same AI Sensy setup the downtime alerts use.
+            Token allocation vs real usage, per OpenAI project. Each account reads only its own project&apos;s usage with
+            its own admin key, and when remaining credit crosses that account&apos;s threshold its own mobile number gets
+            a WhatsApp through the same AI Sensy setup the downtime alerts use.
           </p>
         </div>
         <div className="actions">
@@ -137,11 +138,23 @@ export default function OpenAiTrackPage() {
               { value: 'down', label: 'Critical' },
             ]}
           />
-          <button className="btn" onClick={checkAll} disabled={!rows.length || checking !== null}>
+          <button
+            className="btn"
+            onClick={checkAll}
+            disabled={!rows.length || checking !== null}
+            title="Queries the OpenAI usage API for every account with a key, then re-evaluates the alert thresholds"
+          >
             <IconRefresh />
             {checking === 'all' ? 'Checking…' : 'Check now'}
           </button>
-          <button className="btn btn-primary" onClick={() => setAdding(true)} disabled={!clients.length}>
+          {/* Disabled without a client the account could belong to. Saying so
+              beats a dead button an operator has to guess about. */}
+          <button
+            className="btn btn-primary"
+            onClick={() => setAdding(true)}
+            disabled={!clients.length}
+            title={clients.length ? undefined : 'Add a client first — an OpenAI account is tracked against one.'}
+          >
             <IconPlus />
             Add OpenAI account
           </button>
@@ -153,7 +166,9 @@ export default function OpenAiTrackPage() {
       {!error && (note || (!loading && !rows.length)) && (
         <div className="tip" style={{ background: 'var(--soft)', borderColor: 'var(--border)', color: 'var(--muted)' }}>
           {!rows.length
-            ? 'No OpenAI account tracked yet — click Add OpenAI account, set the client, the token allocation and the mobile number to alert.'
+            ? clients.length
+              ? 'No OpenAI account tracked yet — click Add OpenAI account, then set its admin key (sk-admin-…), its OpenAI project ID, the token allocation and the mobile number to alert.'
+              : 'No clients yet. An OpenAI account is tracked against a client, so add one on the Clients page first.'
             : note}
         </div>
       )}
@@ -176,11 +191,13 @@ export default function OpenAiTrackPage() {
             <table className="data">
               <thead>
                 <tr>
-                  <th>Client</th>
+                  <th>Project / account</th>
+                  <th>OpenAI project</th>
                   <th>Status</th>
-                  <th>OpenAI API key</th>
-                  <th>Mobile number</th>
+                  <th>Usage</th>
                   <th>Remaining</th>
+                  <th>Alert</th>
+                  <th>WhatsApp recipient</th>
                   <th>Last checked</th>
                   <th></th>
                 </tr>
@@ -193,8 +210,25 @@ export default function OpenAiTrackPage() {
                       <tr>
                         <td className="client" style={{ cursor: 'pointer' }} onClick={() => setExpanded(open ? null : r.id)} title="Click for usage detail">
                           <span style={{ display: 'inline-block', width: 14, color: 'var(--muted)' }}>{open ? '▾' : '▸'}</span>
-                          {r.client_name}
-                          <div className="sub">{r.name}</div>
+                          {r.name}
+                          <div className="sub">{r.client_name}</div>
+                        </td>
+                        {/* The real OpenAI project this account reads usage for — kept
+                            visibly separate from the display name above, and from the
+                            masked key hint, so no two accounts can be confused. */}
+                        <td className="sub mono">
+                          {r.project_id ? (
+                            r.project_id
+                          ) : r.has_key ? (
+                            <span style={{ color: 'var(--red)' }} title="A stored key with no project ID cannot be scoped to this account">
+                              missing — set it
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--faint)' }}>—</span>
+                          )}
+                          <div className="sub" style={{ color: 'var(--faint)' }}>
+                            key {r.has_key ? (r.label ?? 'saved') : 'not set'}
+                          </div>
                         </td>
                         <td>
                           {r.budgeted ? (
@@ -205,11 +239,45 @@ export default function OpenAiTrackPage() {
                             </span>
                           )}
                         </td>
-                        <td className="sub mono">
-                          {r.has_key ? (
-                            r.label ?? 'saved'
+                        <td className="sub">
+                          {fmt(r.used_tokens)}
+                          <span style={{ color: 'var(--faint)' }}> / {fmt(r.allocated_tokens)}</span>
+                          {/* A failed pull keeps the last real figure on purpose (a stale
+                              "critical" must not become healthy because OpenAI was
+                              unreachable) — but then this number is NOT a live reading, and
+                              saying "OpenAI usage API" alone would claim that it is. */}
+                          {r.used_source === 'api' && r.last_check_error ? (
+                            <div className="sub" style={{ color: 'var(--amber)' }} title={r.last_check_error}>
+                              OpenAI usage API · stale
+                            </div>
                           ) : (
-                            <span style={{ color: 'var(--faint)' }}>not set</span>
+                            <div className="sub" style={{ color: 'var(--faint)' }}>
+                              {r.used_source === 'api' ? 'OpenAI usage API · 30d' : 'entered manually'}
+                            </div>
+                          )}
+                        </td>
+                        <td className="resp">
+                          {r.budgeted ? (
+                            <div style={{ minWidth: 120 }}>
+                              <Meter
+                                name={`${r.remaining_pct}%`}
+                                pct={r.remaining_pct}
+                                color={r.status === 'down' ? 'var(--red)' : r.status === 'warning' ? 'var(--amber)' : 'var(--green)'}
+                              />
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--faint)' }}>—</span>
+                          )}
+                        </td>
+                        <td className="sub">
+                          {r.alerted ? (
+                            <span style={{ color: 'var(--amber)' }} title={r.last_alerted_at ? `last sent ${new Date(r.last_alerted_at).toLocaleString()}` : undefined}>
+                              notified
+                            </span>
+                          ) : r.low_since ? (
+                            <span style={{ color: 'var(--red)' }}>low · not delivered</span>
+                          ) : (
+                            <span style={{ color: 'var(--faint)' }}>none</span>
                           )}
                         </td>
                         <td>
@@ -251,19 +319,6 @@ export default function OpenAiTrackPage() {
                             </span>
                           )}
                         </td>
-                        <td className="resp">
-                          {r.budgeted ? (
-                            <div style={{ minWidth: 120 }}>
-                              <Meter
-                                name={`${r.remaining_pct}%`}
-                                pct={r.remaining_pct}
-                                color={r.status === 'down' ? 'var(--red)' : r.status === 'warning' ? 'var(--amber)' : 'var(--green)'}
-                              />
-                            </div>
-                          ) : (
-                            <span style={{ color: 'var(--faint)' }}>—</span>
-                          )}
-                        </td>
                         <td className="sub">
                           {r.last_check_error ? (
                             <span style={{ color: 'var(--red)' }} title={r.last_check_error}>
@@ -289,12 +344,27 @@ export default function OpenAiTrackPage() {
                       </tr>
                       {open && (
                         <tr>
-                          <td colSpan={7} style={{ background: 'var(--soft)' }}>
+                          <td colSpan={9} style={{ background: 'var(--soft)' }}>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 14, padding: '4px 20px 10px' }}>
+                              <Detail label="OpenAI project ID" value={r.project_id || 'not set'} />
                               <Detail label="Allocated" value={`${fmt(r.allocated_tokens)} tokens`} />
-                              <Detail label="Used" value={`${fmt(r.used_tokens)} tokens`} />
+                              <Detail
+                                label={r.used_source === 'api' ? 'Used (last 30 days)' : 'Used'}
+                                value={`${fmt(r.used_tokens)} tokens`}
+                              />
                               <Detail label="Remaining" value={r.budgeted ? `${fmt(r.remaining_tokens)} tokens` : '—'} />
-                              <Detail label="Usage source" value={r.used_source === 'api' ? 'OpenAI Usage API' : 'entered manually'} />
+                              <Detail
+                                label="Usage source"
+                                value={
+                                  r.used_source === 'api'
+                                    ? r.last_check_error
+                                      ? 'OpenAI Usage API — last pull FAILED, figure is stale'
+                                      : 'OpenAI Usage API (admin key)'
+                                    : r.has_key
+                                      ? 'entered manually — no successful pull yet'
+                                      : 'entered manually — no key stored'
+                                }
+                              />
                               <Detail label="Low / critical at" value={`${r.low_threshold_pct}% / ${r.critical_threshold_pct}% remaining`} />
                               <Detail label="Alert contact" value={r.alert_name || '(client default)'} />
                               <Detail label="Alerting to" value={r.effective_phone ?? 'nobody — no number set'} />
@@ -310,7 +380,6 @@ export default function OpenAiTrackPage() {
                               />
                               {r.low_since && <Detail label="Low since" value={new Date(r.low_since).toLocaleString()} />}
                               {r.org_id && <Detail label="Organization" value={r.org_id} />}
-                              {r.project_id && <Detail label="Project" value={r.project_id} />}
                             </div>
                             {r.last_check_error && (
                               <div style={{ padding: '0 20px 12px', fontSize: 12.5, color: 'var(--red)' }}>

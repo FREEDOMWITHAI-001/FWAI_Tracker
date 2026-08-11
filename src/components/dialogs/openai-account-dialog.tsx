@@ -42,6 +42,13 @@ export function OpenAiAccountDialog({
     if (Number(form.critical_threshold_pct) > Number(form.low_threshold_pct)) {
       return setErr('Critical threshold must be less than or equal to the low threshold.');
     }
+    // Mirrors the server rule so the operator is told before the round trip: a
+    // key with no project id would pull the whole organization's usage, which is
+    // some other account's number, not this one's.
+    const willHaveKey = form.api_key.trim() ? true : editing && clearKey ? false : hasKey;
+    if (willHaveKey && !form.project_id?.trim()) {
+      return setErr('Enter the OpenAI project ID (proj_…) — usage is read per project, so a key without one is not tracking this project.');
+    }
     setBusy(true);
     setErr('');
     try {
@@ -100,14 +107,14 @@ export function OpenAiAccountDialog({
             options={clients.map((c) => ({ value: c.id, label: c.name }))}
           />
         </Field>
-        <Field label="Account name">
-          <input className="input" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Acme — production" autoFocus />
+        <Field label="Account / project name" hint="For display only — this is not the OpenAI project ID.">
+          <input className="input" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="ABC Production" autoFocus />
         </Field>
       </div>
 
       <Field
-        label={hasKey ? 'OpenAI API key — saved; paste to replace' : 'OpenAI API key'}
-        hint="Encrypted before storage and never sent back to the browser. Usage tracking needs an admin key (sk-admin-…); a project key still works for everything except the automatic usage pull."
+        label={hasKey ? 'OpenAI admin key — saved; paste to replace' : 'OpenAI admin key'}
+        hint="Must be an admin key (sk-admin-…) created under Organization → Admin keys. The usage endpoint is organization-scoped and rejects a project key (sk-proj-…) with 401, so a project key cannot read usage at all. Encrypted before storage and never sent back to the browser."
       >
         <input
           className="input"
@@ -127,11 +134,20 @@ export function OpenAiAccountDialog({
       )}
 
       <div className="field-row">
-        <Field label="Organization ID (optional)">
+        <Field label="Organization ID (optional)" hint="Recorded for reference; the admin key already determines the org.">
           <input className="input" value={form.org_id ?? ''} onChange={(e) => set('org_id', e.target.value)} placeholder="org-…" />
         </Field>
-        <Field label="Project ID (optional)" hint="Scopes the usage pull to one project.">
-          <input className="input" value={form.project_id ?? ''} onChange={(e) => set('project_id', e.target.value)} placeholder="proj_…" />
+        <Field
+          label="OpenAI project ID"
+          hint="Required whenever a key is stored. Usage is read for THIS project only — without it the pull returns the whole organization's consumption, which is not this account's number."
+        >
+          <input
+            className="input"
+            value={form.project_id ?? ''}
+            onChange={(e) => set('project_id', e.target.value)}
+            placeholder="proj_…"
+            style={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }}
+          />
         </Field>
       </div>
 
@@ -146,7 +162,10 @@ export function OpenAiAccountDialog({
             placeholder="10000000"
           />
         </Field>
-        <Field label="Used tokens" hint="Filled automatically when an admin key is saved; enter by hand otherwise.">
+        <Field
+          label="Used tokens"
+          hint="Overwritten by the real figure from OpenAI on every check once an admin key is saved (trailing 30 days). Only edit this on an account with no key."
+        >
           <input
             className="input"
             type="number"
@@ -171,7 +190,10 @@ export function OpenAiAccountDialog({
         <Field label="Alert contact name (optional)" hint="Defaults to the client's contact if blank.">
           <input className="input" value={form.alert_name ?? ''} onChange={(e) => set('alert_name', e.target.value)} placeholder="Acme ops" />
         </Field>
-        <Field label="Mobile number" hint="With country code, e.g. +91XXXXXXXXXX. Blank falls back to the client's alert number.">
+        <Field
+          label="WhatsApp / mobile number"
+          hint="Where THIS account's credit alerts go, over the existing AI Sensy setup. With country code, e.g. +91XXXXXXXXXX. Blank falls back to the client's alert number."
+        >
           <input className="input" value={form.alert_phone ?? ''} onChange={(e) => set('alert_phone', e.target.value)} placeholder="+919999999999" />
         </Field>
       </div>

@@ -83,17 +83,38 @@ export function creditState(a: {
 }
 
 /**
- * Total tokens consumed over the trailing window, from the Usage API.
+ * Total tokens consumed over the trailing window, for ONE project.
  *
- * NOTE this endpoint is organization-scoped and needs an **admin** key
- * (`sk-admin-…`); a plain project key gets a 401. That is why a failure here is
- * recorded on the row rather than thrown away — an account whose key cannot read
- * usage keeps whatever figure was entered by hand and says why.
+ * Authentication: `/v1/organization/usage/*` is organization-scoped and needs an
+ * **admin** key (`sk-admin-…`) minted under Organization → Admin keys. A normal
+ * project key (`sk-proj-…`) is rejected with 401 and cannot read usage at all —
+ * so the failure is recorded on the row rather than thrown away, and the account
+ * keeps whatever figure was entered by hand while saying why.
+ *
+ * Scoping: `projectId` is REQUIRED. It is sent as `project_ids[]`, which is the
+ * encoding OpenAI's own SDK emits (its query serialiser runs with
+ * arrayFormat:'brackets'), and it is what keeps two accounts under one
+ * organization from reading each other's consumption. Without it the endpoint
+ * answers for the WHOLE organization, and every account sharing that admin key
+ * would report the same number and cross the same threshold together.
+ *
+ * Because that isolation is the entire point, it is not left to trust:
+ * `group_by=project_id` makes the API label every result with the project it
+ * belongs to, and any result carrying a DIFFERENT project id is discarded here.
+ * If the server-side filter ever changed shape, this account would under-report
+ * rather than silently absorb another project's usage.
  */
-async function fetchUsedTokens(apiKey: string, projectId: string | null): Promise<number> {
+async function fetchUsedTokens(apiKey: string, projectId: string): Promise<number> {
   const startTime = Math.floor((Date.now() - USAGE_DAYS * 86_400_000) / 1000);
-  const base = new URLSearchParams({ start_time: String(startTime), bucket_width: '1d', limit: '31' });
-  if (projectId) base.set('project_ids[]', projectId);
+  const base = new URLSearchParams({
+    start_time: String(startTime),
+    bucket_width: '1d',
+    limit: '31', // API maximum for 1d buckets
+  });
+  base.set('project_ids[]', projectId);
+  // Makes result.project_id non-null so the cross-check below has something to
+  // compare; without a group_by the API returns it as null.
+  base.set('group_by[]', 'project_id');
 
   let total = 0;
   let page = '';
@@ -111,6 +132,10 @@ async function fetchUsedTokens(apiKey: string, projectId: string | null): Promis
     const json = text ? JSON.parse(text) : {};
     for (const bucket of json.data ?? []) {
       for (const r of bucket.results ?? []) {
+        // Belt and braces: never count a bucket the API attributed elsewhere.
+        if (r.project_id && r.project_id !== projectId) continue;
+        // input_cached_tokens / input_audio_tokens are SUBSETS of input_tokens,
+        // so adding them would double-count.
         total += num(r.input_tokens) + num(r.output_tokens);
       }
     }
@@ -143,11 +168,24 @@ export async function checkOpenAiAccount(acct: OpenAiAccountRow): Promise<CheckO
 
   if (acct.credentials_encrypted) {
     try {
+      // A stored key with no project id predates the project requirement (or was
+      // written straight into the database). Pulling anyway would attribute the
+      // whole organization's consumption to this one account, so it is refused
+      // and said out loud instead — the row keeps its manual figure.
+      if (!acct.project_id) {
+        throw new Error(
+          'No OpenAI project ID on this account — usage cannot be scoped to it. Edit the account and set its project ID (proj_…).'
+        );
+      }
+      // Decrypted per account, used for this account only, and never returned or
+      // logged: the plaintext key does not leave this block.
       const key = decrypt(acct.credentials_encrypted);
       used = await fetchUsedTokens(key, acct.project_id);
       source = 'api';
     } catch (e) {
       error = e instanceof Error ? e.message : 'usage check failed';
+      // Deliberately identifies the account by name only. The key, the
+      // ciphertext and the response body never reach the log.
       console.error('[openai] usage check failed for', acct.name, '-', error);
     }
   }

@@ -87,7 +87,8 @@ export async function PATCH(req: Request, { params }: Ctx) {
     // Validate and recompute against whatever the row will end up with, not just
     // what this request happened to include.
     const current = await maybeOne<any>(
-      `select allocated_tokens, used_tokens, low_threshold_pct, critical_threshold_pct
+      `select allocated_tokens, used_tokens, low_threshold_pct, critical_threshold_pct, project_id,
+              credentials_encrypted is not null as has_key
          from openai_accounts where id = $1`,
       [id]
     );
@@ -95,6 +96,18 @@ export async function PATCH(req: Request, { params }: Ctx) {
     const low = Number(patch.low_threshold_pct ?? current.low_threshold_pct);
     const critical = Number(patch.critical_threshold_pct ?? current.critical_threshold_pct);
     if (critical > low) return bad('Critical threshold must be less than or equal to the low threshold');
+
+    // Same rule as POST, evaluated against what the row will BE after this patch
+    // rather than what this request happened to mention: a stored admin key must
+    // always be paired with a project id, or the usage pull silently becomes
+    // organization-wide and stops being this account's number.
+    const newKey = body.api_key === undefined ? '' : String(body.api_key ?? '').trim();
+    const willHaveKey = newKey ? true : body.clear_api_key ? false : !!current.has_key;
+    const willHaveProject =
+      'project_id' in patch ? !!patch.project_id : !!current.project_id;
+    if (willHaveKey && !willHaveProject) {
+      return bad('An OpenAI project ID is required while an admin key is stored — usage is scoped per project.');
+    }
 
     // `status` is a pure function of allocation, usage and the thresholds, so any
     // edit to those has to recompute it here. Leaving it to the next check would
@@ -110,10 +123,14 @@ export async function PATCH(req: Request, { params }: Ctx) {
     // Only re-encrypt when a new key is actually supplied — the same rule the VM
     // editor uses for .pem keys, so "leave blank to keep" works here too.
     if (body.api_key !== undefined) {
-      const key = String(body.api_key ?? '').trim();
+      const key = newKey;
       if (key) {
         patch.credentials_encrypted = encrypt(key);
         patch.label = keyLabel(key);
+        // A replaced key invalidates the provenance of the current figure: it was
+        // read with the old credential (or typed by hand). It reverts to 'manual'
+        // until the next successful pull proves otherwise.
+        patch.used_source = 'manual';
       } else if (body.clear_api_key) {
         // Explicit removal: usage can no longer be pulled, so it reverts to manual.
         patch.credentials_encrypted = null;

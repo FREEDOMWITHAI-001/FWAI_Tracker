@@ -186,9 +186,21 @@ export async function openIncident(
  * WhatsApp delivery record is worth keeping. The reason is appended so a row that
  * closed without a recovery isn't mysterious; it only ever runs once per row,
  * because the same statement flips status away from 'active'.
+ *
+ * SPLIT INTO TWO STATEMENTS ON PURPOSE. Postgres resolves every relation in a
+ * statement at PARSE time, so a single query that also mentions openai_accounts
+ * fails outright — vms and apps included — on any database where that table has
+ * not been created yet (code deployed ahead of `npm run migrate`). This function
+ * is called from runAlerts() and from the DELETE handler of vms, apps, clients
+ * and openai accounts, so that one missing table used to stop every downtime
+ * WhatsApp alert and turn four delete endpoints into 500s. Core monitoring must
+ * not depend on an optional feature's schema, so the vm/app sweep runs
+ * unconditionally and the openai sweep is attempted only once the table is known
+ * to exist. A guard inside the SQL (`case when to_regclass(...)`) would NOT work
+ * — parse-time resolution happens before any predicate is evaluated.
  */
 export async function closeOrphanedIncidents(): Promise<number> {
-  return exec(
+  let closed = await exec(
     `update alerts a
         set status      = 'resolved',
             resolved_at = now(),
@@ -196,11 +208,27 @@ export async function closeOrphanedIncidents(): Promise<number> {
       where a.status = 'active'
         and a.source_id is not null
         and (
-             (a.source_kind = 'vm'     and not exists (select 1 from vms v            where v.id = a.source_id))
-          or (a.source_kind = 'app'    and not exists (select 1 from apps p           where p.id = a.source_id))
-          or (a.source_kind = 'openai' and not exists (select 1 from openai_accounts o where o.id = a.source_id))
+             (a.source_kind = 'vm'  and not exists (select 1 from vms v  where v.id = a.source_id))
+          or (a.source_kind = 'app' and not exists (select 1 from apps p where p.id = a.source_id))
         )`
   );
+
+  const present = await maybeOne<{ reg: string | null }>(
+    `select to_regclass('public.openai_accounts')::text as reg`
+  );
+  if (!present?.reg) return closed;
+
+  closed += await exec(
+    `update alerts a
+        set status      = 'resolved',
+            resolved_at = now(),
+            description = coalesce(nullif(a.description, ''), '') || ' · target removed'
+      where a.status = 'active'
+        and a.source_id is not null
+        and a.source_kind = 'openai'
+        and not exists (select 1 from openai_accounts o where o.id = a.source_id)`
+  );
+  return closed;
 }
 
 /**
