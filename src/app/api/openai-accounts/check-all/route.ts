@@ -1,17 +1,17 @@
 import { ok, guard } from '@/lib/api';
-import { syncOpenAiCredits } from '@/lib/openai-credits';
+import { syncOpenAiChecks } from '@/lib/openai-check';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
 // POST /api/openai-accounts/check-all (GET also works)
-// Refresh every account's usage and fire any low-credit alerts. Same shape as
+// Probe every project key and fire any no-credit alerts. Same shape as
 // /api/vms/check-all and /api/cloud-accounts/sync-all so an external scheduler
 // can drive it the same way.
 async function run() {
   return guard(async () => {
     const started = Date.now();
-    const { checked } = await syncOpenAiCredits();
+    const { checked } = await syncOpenAiChecks();
     return ok({ checked, ms: Date.now() - started });
   });
 }

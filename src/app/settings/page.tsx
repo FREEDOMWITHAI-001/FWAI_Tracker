@@ -168,7 +168,7 @@ export default function SettingsPage() {
               <input className="input" value={ai.campaign ?? ''} onChange={(e) => setAiField('campaign', e.target.value)} placeholder="downtime_alert" />
             </label>
             <label className="fld">
-              <span>Credits template (optional)</span>
+              <span>OpenAI credit template (optional)</span>
               <input
                 className="input"
                 value={ai.credits_campaign ?? ''}
