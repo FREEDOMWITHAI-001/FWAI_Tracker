@@ -19,6 +19,12 @@ export function bad(message: string, status = 400) {
  */
 function messageOf(e: unknown): string {
   if (!(e instanceof Error)) return 'Unexpected error';
+  // 42P01 = undefined_table. Postgres says only `relation "x" does not exist`,
+  // which reads as a code bug; it is almost always code deployed ahead of its
+  // schema, so the message says what to actually do about it.
+  if ((e as { code?: string }).code === '42P01') {
+    return `${e.message} — the database is missing this table. Run \`npm run migrate\` against it (a deploy now does this automatically).`;
+  }
   if (e.message) return e.message;
 
   const nested = (e as AggregateError).errors;

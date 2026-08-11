@@ -2,9 +2,21 @@
 // Applies migrations/*.sql in numeric order, once each, tracked in
 // schema_migrations. Replaces pasting SQL into a database console by hand.
 //
-//   npm run migrate           apply everything pending
-//   npm run migrate -- --dry  list what would run, change nothing
-//   npm run migrate -- --list show applied vs pending and exit
+//   npm run migrate                    apply everything pending
+//   npm run migrate -- --dry           list what would run, change nothing
+//   npm run migrate -- --list          show applied vs pending and exit
+//   npm run migrate -- --if-configured apply, but exit 0 when there is no
+//                                      DATABASE_URL at all
+//
+// `--if-configured` is what `npm run build` uses. A deploy is the only moment
+// that reliably has both the new .sql files and the production DATABASE_URL in
+// one place, so migrations run there rather than depending on someone
+// remembering to point a laptop at production — that gap is what left a
+// deployed build asking for `openai_accounts` on a database that never got it.
+// An absent DATABASE_URL is not an error (a preview build or a bare `next build`
+// has none and must still succeed); a DATABASE_URL that is set but unreachable
+// or a migration that fails still exits non-zero and fails the build, because
+// shipping code ahead of its schema is exactly the failure being fixed.
 //
 // Each file runs inside a transaction, so a failing migration leaves the
 // database exactly as it was. The migrations are written to be idempotent
@@ -47,15 +59,20 @@ function sslConfig(cs) {
   return { rejectUnauthorized: false };
 }
 
-const cs = connectionString();
-if (!cs) {
-  console.error('DATABASE_URL is not set. Add it to .env.local or export it.');
-  process.exit(1);
-}
-
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry');
 const listOnly = args.includes('--list');
+const ifConfigured = args.includes('--if-configured');
+
+const cs = connectionString();
+if (!cs) {
+  if (ifConfigured) {
+    console.log('[migrate] DATABASE_URL is not set — skipping migrations for this build.');
+    process.exit(0);
+  }
+  console.error('DATABASE_URL is not set. Add it to .env.local or export it.');
+  process.exit(1);
+}
 
 // Order by the numeric prefix, NOT by name. The base schema is `migration.sql`
 // with no number and has to run first, but string collation sorts it after

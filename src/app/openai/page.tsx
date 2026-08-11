@@ -168,7 +168,19 @@ export default function OpenAiTrackPage() {
           {!rows.length
             ? clients.length
               ? 'No OpenAI account tracked yet — click Add OpenAI account, then set its admin key (sk-admin-…), its OpenAI project ID, the token allocation and the mobile number to alert.'
-              : 'No clients yet. An OpenAI account is tracked against a client, so add one on the Clients page first.'
+              : (
+                  // The Add button is disabled in this state, and a disabled
+                  // button with only a tooltip is a dead end — say what unblocks
+                  // it and link straight there.
+                  <>
+                    <strong>Add OpenAI account is disabled because there are no clients yet.</strong> An OpenAI
+                    account is tracked against a client, so{' '}
+                    <a href="/clients" style={{ color: 'var(--accent)', fontWeight: 600 }}>
+                      add a client first
+                    </a>{' '}
+                    — then this button turns on.
+                  </>
+                )
             : note}
         </div>
       )}
