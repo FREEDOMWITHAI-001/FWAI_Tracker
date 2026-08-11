@@ -3,12 +3,13 @@ import { sql } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
 import { checkVm, checkApp } from '@/lib/checks';
 import { runAlerts } from '@/lib/alerts';
-import { syncOpenAiCredits } from '@/lib/openai-credits';
+import { syncOpenAiChecks } from '@/lib/openai-check';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60; // up to 60s on Vercel — plenty for a fleet of a few VMs
 
-// Don't re-pull OpenAI usage more than hourly, however often the cron fires.
+// Each OpenAI check is a real billable request, so don't re-probe a project more
+// than hourly however often the cron fires.
 const OPENAI_STALE_MS = 60 * 60_000;
 
 /**
@@ -74,23 +75,22 @@ export async function GET(req: Request) {
       console.error('[cron] runAlerts failed', e?.message);
     }
 
-    // ---- OpenAI credits, also BEFORE the probes -----------------------------
+    // ---- OpenAI checks, also BEFORE the probes ------------------------------
     // Same starvation reason as runAlerts above: this used to run last, after
     // every probe, so a single unreachable SSH host (30s + retry) exhausted
-    // maxDuration and the function was killed before any low-credit WhatsApp
+    // maxDuration and the function was killed before any no-credit WhatsApp
     // could be sent — silently, because a killed function reports no error.
     //
-    // Usage is only re-pulled for accounts staler than an hour, so this is cheap
-    // on a 5-minute cron; the alert pass inside it is database-only and runs
-    // every time, which is what keeps the 24h repeat honest.
+    // Only projects unchecked for an hour are probed, so this is cheap on a
+    // 5-minute cron.
     let openaiChecked = 0;
     let openaiOk = true;
     try {
-      const r = await syncOpenAiCredits(OPENAI_STALE_MS);
+      const r = await syncOpenAiChecks(OPENAI_STALE_MS);
       openaiChecked = r.checked;
     } catch (e: any) {
       openaiOk = false;
-      console.error('[cron] openai credit sync failed', e?.message);
+      console.error('[cron] openai check failed', e?.message);
     }
 
     // VMs: anything with SSH, a port, or a Health URL set.

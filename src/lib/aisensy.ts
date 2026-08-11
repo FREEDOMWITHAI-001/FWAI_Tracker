@@ -8,10 +8,10 @@ export interface AisensyConfig {
   enabled: boolean;
   api_url: string; // default AI Sensy Campaign API v2 endpoint
   campaign: string; // approved campaign/template name
-  // Optional second approved template for OpenAI low-credit alerts. Same
+  // Optional second approved template for OpenAI credit alerts. Same
   // integration and same API key — only the template differs, because the
   // downtime template's 4th variable reads as "minutes" and a credit alert needs
-  // to say "% remaining". Blank falls back to `campaign`.
+  // to say what OpenAI reported. Blank falls back to `campaign`.
   credits_campaign: string;
   username: string; // display name sent with the message
   threshold_min: number; // minutes down before alerting

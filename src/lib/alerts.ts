@@ -16,9 +16,12 @@ import { getAisensyConfig, sendAisensy, type AisensyConfig } from '@/lib/aisensy
 // alert, delivery state refreshed on each repeat, resolved on recovery.
 
 /**
- * Re-alert once a day while an incident continues. Exported so every alerting
- * surface throttles on the same number instead of picking its own — see
- * src/lib/openai-credits.ts.
+ * Re-alert once a day while an incident continues.
+ *
+ * Used by the VM/app downtime loop below. The OpenAI checker
+ * (src/lib/openai-check.ts) deliberately does NOT repeat: an exhausted quota is
+ * a state change, not an ongoing outage to nag about, so it alerts once per
+ * episode and again only after a recovery.
  */
 export const REPEAT_ALERT_MS = 24 * 60 * 60_000;
 

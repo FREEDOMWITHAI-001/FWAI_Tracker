@@ -119,38 +119,36 @@ export interface Alert {
 }
 
 /**
- * A client's OpenAI API account, tracked as a token budget: `allocated_tokens`
- * is what the ops team granted, `used_tokens` what has been consumed. The key
- * itself never reaches the browser — `has_key` and `label` stand in for it.
+ * Outcome of one OpenAI project check. This says whether the project can
+ * currently make a billable request — NOT what its dollar balance is, which no
+ * API exposes for a project key.
+ */
+export type OpenAiCheckStatus = 'CREDIT_AVAILABLE' | 'NO_CREDIT' | 'INVALID_KEY' | 'CHECK_FAILED';
+
+/**
+ * A client's OpenAI project, tracked only as "can it make requests right now".
+ * The key itself never reaches the browser — `has_key` and the masked `label`
+ * stand in for it.
  */
 export interface OpenAiAccount {
   id: string;
   client_id: string;
+  /** Project name, as the operator typed it. */
   name: string;
   /** Masked hint for the stored key, e.g. "sk-…4f2a". Never the key itself. */
   label: string | null;
-  org_id: string | null;
-  project_id: string | null;
-  allocated_tokens: number;
-  used_tokens: number;
-  used_source: 'manual' | 'api';
-  low_threshold_pct: number;
-  critical_threshold_pct: number;
-  status: Status;
+  status: OpenAiCheckStatus;
+  /** A no-credit WhatsApp has been delivered for the current episode. */
   alerted: boolean;
   last_alerted_at: string | null;
-  low_since: string | null;
+  /** Contact person for this project's alerts; falls back to the client's. */
   alert_name: string | null;
   alert_phone: string | null;
+  /** Null until the first check runs. */
   last_checked_at: string | null;
   last_check_error: string | null;
   created_at: string;
   has_key: boolean;
-  // Derived server-side so the list doesn't recompute them per render.
-  remaining_tokens: number;
-  remaining_pct: number;
-  /** False when no allocation is set — nothing to be a percentage of. */
-  budgeted: boolean;
 }
 
 export interface WebinarStage {

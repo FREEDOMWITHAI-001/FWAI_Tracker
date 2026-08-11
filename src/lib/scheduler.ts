@@ -2,7 +2,7 @@ import { exec, sql } from './db';
 import { checkVm, checkApp } from './checks';
 import { syncCloudAccount } from './cloud-sync';
 import { runAlerts } from './alerts';
-import { syncOpenAiCredits } from './openai-credits';
+import { syncOpenAiChecks } from './openai-check';
 
 // Server-side scheduler. Started from instrumentation.ts when the Next server
 // boots, so checks run automatically even with no browser open. Stops when the
@@ -55,13 +55,13 @@ async function runCloudSync() {
   }
 }
 
-// OpenAI usage lives behind a rate-limited org API and moves slowly, so it runs
-// on its own much longer interval rather than with the reachability probes.
+// Each OpenAI check is a real billable request, so it runs on its own much
+// longer interval rather than alongside the reachability probes.
 async function runOpenAiSync() {
   try {
-    await syncOpenAiCredits();
+    await syncOpenAiChecks();
   } catch (e) {
-    console.error('[scheduler] openai credit sync failed:', e instanceof Error ? e.message : e);
+    console.error('[scheduler] openai check failed:', e instanceof Error ? e.message : e);
   }
 }
 
@@ -90,7 +90,7 @@ export function startScheduler() {
   const openaiMs = Number(process.env.OPENAI_SYNC_INTERVAL_MS) || 3_600_000; // 1 hour
   console.log(
     `[scheduler] started — checks every ${checkMs / 1000}s, cloud sync every ${cloudMs / 1000}s, ` +
-      `openai credits every ${openaiMs / 1000}s`
+      `openai checks every ${openaiMs / 1000}s`
   );
 
   setTimeout(runChecks, 3000); // first run shortly after boot
