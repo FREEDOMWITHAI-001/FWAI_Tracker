@@ -699,15 +699,58 @@ async function main() {
       assert.equal(sent[0].destination, '910000000003');
     });
 
-    await check('a project keeps the number migrated from its old alert_phone', async () => {
+    // Upgrade path: a project that predates migration 22 must keep its single
+    // alert_phone as a recipient. Reproduced by restoring the pre-22 shape and
+    // replaying the migration file VERBATIM off disk — the same bytes that run
+    // in production — so this stays repeatable rather than depending on
+    // whatever happens to be left in the database.
+    await check('migration 22 carries an old alert_phone across to the contacts table', async () => {
+      const sqlText = await readFile('migrations/migration_22_openai_contacts_and_daily_check.sql', 'utf8');
+
+      await db.query('alter table openai_accounts add column if not exists alert_phone text');
       const legacy = await row1(
         db,
-        `select a.id, k.phone from openai_accounts a
-           join openai_account_contacts k on k.openai_account_id = a.id
-          where a.name = 'Legacy Project'`
+        `insert into openai_accounts
+           (client_id, name, status, alert_name, alert_phone, alerted, last_alerted_at)
+         values ($1, 'Pre-22 Project', 'NO_CREDIT', 'Legacy Ops', '+919111100000', true, now() - interval '2 hours')
+         returning id`,
+        [client.id]
       );
-      assert.ok(legacy, 'the pre-migration project lost its recipient');
-      assert.equal(legacy.phone, '+919111100000');
+
+      await db.query(sqlText); // the real migration, unmodified
+
+      const moved = await rows(
+        db,
+        'select phone, alerted_at from openai_account_contacts where openai_account_id = $1',
+        [legacy.id]
+      );
+      assert.equal(moved.length, 1, 'the pre-migration number was not carried across');
+      assert.equal(moved[0].phone, '+919111100000');
+      assert.ok(
+        moved[0].alerted_at,
+        'the episode latch was not carried across — the contact would be messaged again for an incident they already know about'
+      );
+
+      const cols22 = (
+        await rows(db, `select column_name from information_schema.columns where table_name = 'openai_accounts'`)
+      ).map((r) => r.column_name);
+      assert.ok(!cols22.includes('alert_phone'), 'migration 22 left alert_phone behind');
+
+      const enabled = await row1(db, 'select daily_check_enabled from openai_accounts where id = $1', [legacy.id]);
+      assert.equal(enabled.daily_check_enabled, true, 'an existing project must keep being checked by default');
+
+      await db.query('delete from openai_accounts where id = $1', [legacy.id]);
+    });
+
+    await check('replaying migration 22 a second time changes nothing', async () => {
+      const sqlText = await readFile('migrations/migration_22_openai_contacts_and_daily_check.sql', 'utf8');
+      await db.query(sqlText);
+      const still = await rows(
+        db,
+        'select phone from openai_account_contacts where openai_account_id = $1 order by phone',
+        [id]
+      );
+      assert.equal(still.length, 3, `re-running the migration disturbed the recipients: ${still.length}`);
     });
 
     // ---- daily-check toggle -------------------------------------------------
@@ -753,6 +796,27 @@ async function main() {
     });
 
     // ---- schedule configuration --------------------------------------------
+    // Vercel validates vercel.json with additionalProperties:false and rejects
+    // the whole DEPLOYMENT — before the build — on an unknown top-level key.
+    // That is not reproducible by `npm run build`, which is how a "$comment"
+    // key shipped and broke a preview deploy while every local check passed.
+    await check('vercel.json uses only top-level keys Vercel accepts', async () => {
+      const cfg = JSON.parse(await readFile('vercel.json', 'utf8'));
+      const ALLOWED = new Set([
+        '$schema', 'alias', 'build', 'builds', 'cleanUrls', 'crons', 'env', 'functions', 'git',
+        'github', 'headers', 'images', 'installCommand', 'buildCommand', 'devCommand',
+        'outputDirectory', 'framework', 'ignoreCommand', 'name', 'public', 'redirects', 'regions',
+        'rewrites', 'routes', 'trailingSlash',
+      ]);
+      const unknown = Object.keys(cfg).filter((k) => !ALLOWED.has(k));
+      assert.deepEqual(
+        unknown,
+        [],
+        `Vercel rejects vercel.json outright for unknown top-level keys: ${unknown.join(', ')}. ` +
+          'JSON has no comments — put the explanation in the code the config refers to.'
+      );
+    });
+
     await check('vercel.json declares exactly one daily cron at 09:00 Asia/Kolkata', async () => {
       const cfg = JSON.parse(await readFile('vercel.json', 'utf8'));
       assert.equal(cfg.crons.length, 1, `expected 1 cron entry, found ${cfg.crons.length}`);
@@ -787,6 +851,33 @@ async function main() {
       assert.equal(r.json.openai_daily, false, 'the bare path claimed to be the daily trigger');
       assert.equal(openAiHits, before, 'the 5-minute poll sent a request to OpenAI');
       assert.ok('vms_checked' in r.json, 'the bare path stopped doing its VM work');
+    });
+
+    // The query string on a cron path is undocumented, so the handler must also
+    // recognise Vercel's own cron header — otherwise a dropped query string
+    // would mean the daily check silently never runs in production.
+    await check("Vercel's cron header triggers the daily run without the query flag", async () => {
+      await resetEpisode(db, id);
+      await makeDue(db, id);
+      const before = openAiHits;
+      nextOpenAi = { status: 200, body: { choices: [] } };
+      const r = await req('GET', '/api/cron/check-all', undefined, {
+        authorization: `Bearer ${CRON_SECRET}`,
+        'x-vercel-cron-schedule': '30 3 * * *',
+      });
+      assert.equal(r.json.openai_daily, true, 'the cron header was not recognised as the daily trigger');
+      assert.equal(openAiHits, before + 1, 'the header-triggered run did not check the project');
+    });
+
+    await check("the vercel-cron user agent also triggers it", async () => {
+      await makeDue(db, id);
+      const before = openAiHits;
+      const r = await req('GET', '/api/cron/check-all', undefined, {
+        authorization: `Bearer ${CRON_SECRET}`,
+        'user-agent': 'vercel-cron/1.0',
+      });
+      assert.equal(r.json.openai_daily, true, 'the vercel-cron user agent was not recognised');
+      assert.equal(openAiHits, before + 1, 'the user-agent-triggered run did not check the project');
     });
 
     await check('due_since is the most recent 09:00 IST boundary', async () => {
