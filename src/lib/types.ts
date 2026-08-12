@@ -138,12 +138,20 @@ export interface OpenAiAccount {
   /** Masked hint for the stored key, e.g. "sk-…4f2a". Never the key itself. */
   label: string | null;
   status: OpenAiCheckStatus;
-  /** A no-credit WhatsApp has been delivered for the current episode. */
+  /** At least one recipient has been messaged about the current episode. */
   alerted: boolean;
   last_alerted_at: string | null;
   /** Contact person for this project's alerts; falls back to the client's. */
   alert_name: string | null;
-  alert_phone: string | null;
+  /** Every WhatsApp number configured on this project, in the order added. */
+  phones: string[];
+  /**
+   * Who a no-credit alert would actually reach: the project's own numbers, or
+   * the client's single number when the project has none of its own.
+   */
+  effective_phones?: string[];
+  /** Whether the once-daily 09:00 IST check includes this project. */
+  daily_check_enabled: boolean;
   /** Null until the first check runs. */
   last_checked_at: string | null;
   last_check_error: string | null;

@@ -5,9 +5,9 @@ import { Modal, Field, StatusSelect } from '@/components/ui';
 import { api } from '@/lib/client';
 import type { OpenAiAccount, Client } from '@/lib/types';
 
-// Five fields, deliberately. A client is asked for their own project key and who
-// to message — nothing else. No admin key, organization ID, OpenAI project ID,
-// token allocation or threshold percentages: the check is "can this key make a
+// Client, project name, project API key, contact person, and one or more
+// WhatsApp numbers. No admin key, organization ID, OpenAI project ID, token
+// allocation or threshold percentages — the check is "can this key make a
 // request", which needs none of them. See migration 21.
 export function OpenAiAccountDialog({
   initial,
@@ -25,19 +25,33 @@ export function OpenAiAccountDialog({
     client_id: initial?.client_id ?? clients[0]?.id ?? '',
     name: initial?.name ?? '',
     alert_name: initial?.alert_name ?? '',
-    alert_phone: initial?.alert_phone ?? '',
     api_key: '',
   });
+  // Always at least one row so the primary number has somewhere to go.
+  const [phones, setPhones] = useState<string[]>(initial?.phones?.length ? [...initial.phones] : ['']);
+  const [daily, setDaily] = useState(initial?.daily_check_enabled ?? true);
   const hasKey = !!initial?.has_key;
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const setPhone = (i: number, v: string) => setPhones((p) => p.map((x, j) => (j === i ? v : x)));
+  const addPhone = () => setPhones((p) => [...p, '']);
+  const removePhone = (i: number) => setPhones((p) => (p.length === 1 ? [''] : p.filter((_, j) => j !== i)));
 
   const save = async () => {
     if (!form.client_id) return setErr('Pick a client.');
     if (!form.name.trim()) return setErr('Project name is required.');
     // Required on create; on edit, blank means "keep the saved key".
     if (!editing && !form.api_key.trim()) return setErr('Enter the OpenAI project API key.');
+
+    const cleaned = [...new Set(phones.map((p) => p.trim()).filter(Boolean))];
+    // Mirrors the server rule so the operator is told before the round trip. The
+    // server also accepts a client-level number as the fallback; it will say so
+    // if that applies.
+    if (daily && !cleaned.length) {
+      return setErr('Add at least one WhatsApp number, or switch daily checking off.');
+    }
 
     setBusy(true);
     setErr('');
@@ -46,7 +60,8 @@ export function OpenAiAccountDialog({
         client_id: form.client_id,
         name: form.name.trim(),
         alert_name: form.alert_name.trim() || null,
-        alert_phone: form.alert_phone.trim() || null,
+        phones: cleaned,
+        daily_check_enabled: daily,
       };
       // Only send a key when one was typed, so "leave blank to keep" works —
       // the same rule the VM editor uses for .pem keys.
@@ -113,27 +128,73 @@ export function OpenAiAccountDialog({
         />
       </Field>
 
-      <div className="field-row">
-        <Field label="Contact person name" hint="Defaults to the client's contact if blank.">
-          <input
-            className="input"
-            value={form.alert_name}
-            onChange={(e) => set('alert_name', e.target.value)}
-            placeholder="Acme ops"
-          />
-        </Field>
-        <Field
-          label="WhatsApp / mobile number"
-          hint="Messaged over the existing AI Sensy setup if this project runs out of credit. With country code, e.g. +91XXXXXXXXXX. Blank falls back to the client's number."
-        >
-          <input
-            className="input"
-            value={form.alert_phone}
-            onChange={(e) => set('alert_phone', e.target.value)}
-            placeholder="+919999999999"
-          />
-        </Field>
-      </div>
+      <Field label="Contact person name" hint="Defaults to the client's contact if blank.">
+        <input
+          className="input"
+          value={form.alert_name}
+          onChange={(e) => set('alert_name', e.target.value)}
+          placeholder="Acme ops"
+        />
+      </Field>
+
+      <Field
+        label="WhatsApp / mobile numbers"
+        hint="Everyone here is messaged over the existing AI Sensy setup if this project runs out of credit — once each per incident. With country code, e.g. +91XXXXXXXXXX. Leave empty to fall back to the client's alert number."
+      >
+        <div style={{ display: 'grid', gap: 6 }}>
+          {phones.map((p, i) => (
+            <div key={i} style={{ display: 'flex', gap: 6 }}>
+              <input
+                className="input"
+                value={p}
+                onChange={(e) => setPhone(i, e.target.value)}
+                placeholder="+919999999999"
+                style={{ flex: 1 }}
+              />
+              {/* The first row has no Remove: clearing it is how you empty the
+                  list, and a Remove that silently re-adds a blank row reads as
+                  broken. */}
+              {i > 0 && (
+                <button
+                  className="btn btn-ghost"
+                  type="button"
+                  onClick={() => removePhone(i)}
+                  style={{ padding: '4px 10px', fontSize: 12, color: 'var(--red)' }}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          ))}
+          <div>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              onClick={addPhone}
+              style={{ padding: '4px 10px', fontSize: 12.5 }}
+            >
+              + Add another number
+            </button>
+          </div>
+        </div>
+      </Field>
+
+      <Field
+        label="Daily checking"
+        hint="When on, this project is checked once a day at 09:00 IST. When off, it is skipped by the daily run — you can still check it by hand with “Check now”."
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button
+            type="button"
+            className={`switch ${daily ? 'on' : ''}`}
+            onClick={() => setDaily((d) => !d)}
+            aria-label="toggle daily checking"
+          >
+            <i />
+          </button>
+          <span style={{ fontSize: 13, color: 'var(--muted)' }}>{daily ? 'ON' : 'OFF'}</span>
+        </div>
+      </Field>
     </Modal>
   );
 }

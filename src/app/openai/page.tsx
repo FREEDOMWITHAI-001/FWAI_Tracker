@@ -10,7 +10,7 @@ import type { OpenAiAccount, OpenAiCheckStatus, Client } from '@/lib/types';
 type Row = OpenAiAccount & {
   client_name: string;
   client_alert_phone: string | null;
-  effective_phone: string | null;
+  effective_phones: string[];
 };
 
 // How each check outcome reads, and which Pill colour carries it. CHECK_FAILED
@@ -45,10 +45,6 @@ export default function OpenAiTrackPage() {
   const [editing, setEditing] = useState<OpenAiAccount | null>(null);
   const [checking, setChecking] = useState<string | null>(null);
   const [note, setNote] = useState('');
-  // Inline mobile-number editing, so changing who gets alerted doesn't need the
-  // full edit dialog.
-  const [phoneEdit, setPhoneEdit] = useState<string | null>(null);
-  const [phoneVal, setPhoneVal] = useState('');
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -114,10 +110,10 @@ export default function OpenAiTrackPage() {
     reload();
   };
 
-  const savePhone = async (id: string) => {
+  const toggleDaily = async (r: Row) => {
+    setNote('');
     try {
-      await api.patch(`/api/openai-accounts/${id}`, { alert_phone: phoneVal.trim() || null });
-      setPhoneEdit(null);
+      await api.patch(`/api/openai-accounts/${r.id}`, { daily_check_enabled: !r.daily_check_enabled });
       await load();
     } catch (e: any) {
       setNote(e.message);
@@ -133,9 +129,10 @@ export default function OpenAiTrackPage() {
         <div>
           <h1>OpenAI Track</h1>
           <p>
-            Whether each client&apos;s OpenAI project can currently make API requests. Every check is one minimal
-            request with that project&apos;s own key; if OpenAI reports the quota/credit is exhausted, the project&apos;s
-            contact gets a WhatsApp through the same AI Sensy setup the downtime alerts use. This does not read a
+            Whether each client&apos;s OpenAI project can currently make API requests. Projects with daily checking on
+            are checked once a day at <strong>09:00 IST</strong>; each check is one minimal request with that
+            project&apos;s own key. If OpenAI reports the quota/credit is exhausted, every WhatsApp number on the
+            project is messaged once through the same AI Sensy setup the downtime alerts use. This does not read a
             dollar balance — OpenAI exposes none for a project key.
           </p>
         </div>
@@ -218,8 +215,9 @@ export default function OpenAiTrackPage() {
                 <tr>
                   <th>Project</th>
                   <th>Status</th>
+                  <th>Daily check</th>
                   <th>Last checked</th>
-                  <th>WhatsApp recipient</th>
+                  <th>WhatsApp recipients</th>
                   <th></th>
                 </tr>
               </thead>
@@ -258,50 +256,31 @@ export default function OpenAiTrackPage() {
                           </>
                         )}
                       </td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <button
+                            type="button"
+                            className={`switch ${r.daily_check_enabled ? 'on' : ''}`}
+                            onClick={() => toggleDaily(r)}
+                            aria-label={`daily checking for ${r.name}`}
+                            title={
+                              r.daily_check_enabled
+                                ? 'Checked once a day at 09:00 IST. Click to switch off.'
+                                : 'Skipped by the daily run — “Check now” still works. Click to switch on.'
+                            }
+                          >
+                            <i />
+                          </button>
+                          <span className="sub" style={{ color: r.daily_check_enabled ? 'var(--muted)' : 'var(--faint)' }}>
+                            {r.daily_check_enabled ? 'ON' : 'OFF'}
+                          </span>
+                        </div>
+                      </td>
                       <td className="sub" title={r.last_checked_at ? new Date(r.last_checked_at).toLocaleString() : undefined}>
                         {ago(r.last_checked_at)}
                       </td>
                       <td>
-                        {phoneEdit === r.id ? (
-                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                            <input
-                              className="input"
-                              style={{ width: 150, padding: '4px 8px', fontSize: 12.5 }}
-                              value={phoneVal}
-                              onChange={(e) => setPhoneVal(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') savePhone(r.id);
-                                if (e.key === 'Escape') setPhoneEdit(null);
-                              }}
-                              placeholder="+919999999999"
-                              autoFocus
-                            />
-                            <button className="btn btn-primary" style={{ padding: '3px 8px', fontSize: 11.5 }} onClick={() => savePhone(r.id)}>
-                              Save
-                            </button>
-                            <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: 11.5 }} onClick={() => setPhoneEdit(null)}>
-                              Cancel
-                            </button>
-                          </div>
-                        ) : (
-                          <span
-                            className="mono"
-                            style={{ cursor: 'pointer', borderBottom: '1px dashed var(--border)' }}
-                            onClick={() => {
-                              setPhoneEdit(r.id);
-                              setPhoneVal(r.alert_phone ?? '');
-                            }}
-                            title="Click to edit"
-                          >
-                            {r.alert_phone ? (
-                              r.alert_phone
-                            ) : r.client_alert_phone ? (
-                              <span style={{ color: 'var(--muted)' }}>{r.client_alert_phone} (client)</span>
-                            ) : (
-                              <span style={{ color: 'var(--red)' }}>none — set one</span>
-                            )}
-                          </span>
-                        )}
+                        <Recipients row={r} />
                         {r.alerted && (
                           <div className="sub" style={{ color: 'var(--amber)' }}>
                             alerted{r.last_alerted_at ? ` ${ago(r.last_alerted_at)}` : ''}
@@ -332,6 +311,38 @@ export default function OpenAiTrackPage() {
 
       {adding && <OpenAiAccountDialog clients={clients} onClose={() => setAdding(false)} onSaved={load} />}
       {editing && <OpenAiAccountDialog initial={editing} clients={clients} onClose={() => setEditing(null)} onSaved={load} />}
+    </div>
+  );
+}
+
+/**
+ * The numbers a no-credit alert would actually reach.
+ *
+ * Capped at two visible rows so a project with six recipients does not turn one
+ * table row into a column; the full list is in the tooltip and the Edit dialog.
+ */
+function Recipients({ row }: { row: Row }) {
+  const list = row.effective_phones ?? [];
+  if (!list.length) {
+    return <span style={{ color: 'var(--red)', fontSize: 12.5 }}>none — nobody would be told</span>;
+  }
+  // No numbers of its own: what is shown is the client's, standing in.
+  const viaClient = !row.phones?.length;
+  const shown = list.slice(0, 2);
+  const rest = list.length - shown.length;
+  return (
+    <div title={list.join('\n')}>
+      {shown.map((p) => (
+        <div key={p} className="mono" style={{ fontSize: 12.5, lineHeight: 1.5 }}>
+          {p}
+          {viaClient && <span style={{ color: 'var(--muted)' }}> (client)</span>}
+        </div>
+      ))}
+      {rest > 0 && (
+        <div className="sub" style={{ color: 'var(--faint)' }}>
+          +{rest} more
+        </div>
+      )}
     </div>
   );
 }
