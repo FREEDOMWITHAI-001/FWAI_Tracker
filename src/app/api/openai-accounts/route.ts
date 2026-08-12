@@ -1,6 +1,7 @@
 import { insertOne, sql } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
 import { encrypt } from '@/lib/crypto';
+import { normalisePhones, replaceContacts } from '@/lib/openai-contacts';
 
 export const runtime = 'nodejs';
 
@@ -13,13 +14,20 @@ function keyLabel(key: string): string {
 }
 
 // The columns the UI needs. Listed explicitly rather than `a.*` so
-// credentials_encrypted cannot reach a response by accident.
+// credentials_encrypted cannot reach a response by accident. Recipients come
+// back as an aggregated array so the list needs no second round trip.
 const SELECT_SAFE = `
   select a.id, a.client_id, a.name, a.label, a.status, a.alerted, a.last_alerted_at,
-         a.alert_name, a.alert_phone, a.last_checked_at, a.last_check_error, a.created_at,
+         a.alert_name, a.daily_check_enabled, a.last_checked_at, a.last_check_error, a.created_at,
          a.credentials_encrypted is not null as has_key,
          coalesce(c.name, '—') as client_name,
-         c.alert_phone         as client_alert_phone
+         c.alert_phone         as client_alert_phone,
+         coalesce(
+           (select array_agg(k.phone order by k.created_at asc)
+              from openai_account_contacts k
+             where k.openai_account_id = a.id),
+           '{}'
+         ) as phones
     from openai_accounts a
     left join clients c on c.id = a.client_id
 `;
@@ -31,16 +39,16 @@ export async function GET() {
     return ok(
       rows.map((a) => ({
         ...a,
-        // The number a message would actually go to, resolved the same way the
-        // alerter resolves it: the account's own, else the client's.
-        effective_phone: a.alert_phone || a.client_alert_phone || null,
+        // Who a message would actually go to, resolved the way the alerter
+        // resolves it: the project's own numbers, else the client's one.
+        effective_phones: a.phones?.length ? a.phones : a.client_alert_phone ? [a.client_alert_phone] : [],
       }))
     );
   });
 }
 
 // POST /api/openai-accounts
-//   { client_id, name, api_key, alert_name?, alert_phone? }
+//   { client_id, name, api_key, alert_name?, phones?: string[], daily_check_enabled? }
 //
 // That is the whole form. No admin key, organization ID, OpenAI project ID,
 // token allocation or threshold percentages — see migration 21 for why those
@@ -51,6 +59,8 @@ export async function POST(req: Request) {
     const client_id = body?.client_id;
     const name = String(body?.name ?? '').trim();
     const apiKey = String(body?.api_key ?? '').trim();
+    const phones = normalisePhones(body?.phones);
+    const dailyCheck = body?.daily_check_enabled === undefined ? true : !!body.daily_check_enabled;
 
     if (!client_id) return bad('Pick a client.');
     if (!name) return bad('Project name is required.');
@@ -58,11 +68,26 @@ export async function POST(req: Request) {
     // nothing to check without a key.
     if (!apiKey) return bad('An OpenAI project API key is required.');
 
+    // A project on the daily schedule with nowhere to send its alert is a
+    // monitor that cannot report, so it is refused at the door — unless the
+    // client has a number the alerter can fall back to.
+    if (dailyCheck && !phones.length) {
+      const client = await sql<{ alert_phone: string | null }>(
+        'select alert_phone from clients where id = $1',
+        [client_id]
+      );
+      if (!client[0]?.alert_phone) {
+        return bad(
+          'Add at least one WhatsApp number, or set an alert number on the client, before turning on daily checking.'
+        );
+      }
+    }
+
     const row: Record<string, unknown> = {
       client_id,
       name,
       alert_name: body.alert_name?.trim() || null,
-      alert_phone: body.alert_phone?.trim() || null,
+      daily_check_enabled: dailyCheck,
       label: keyLabel(apiKey),
       // Unchecked until the first probe runs. `status` defaults to this in the
       // schema too; set explicitly so the row the client gets back says so.
@@ -76,7 +101,8 @@ export async function POST(req: Request) {
     }
 
     const saved = await insertOne<any>('openai_accounts', row);
+    if (phones.length) await replaceContacts(saved.id, phones);
     const { credentials_encrypted, ...safe } = saved;
-    return ok({ ...safe, has_key: !!credentials_encrypted }, 201);
+    return ok({ ...safe, has_key: !!credentials_encrypted, phones }, 201);
   });
 }

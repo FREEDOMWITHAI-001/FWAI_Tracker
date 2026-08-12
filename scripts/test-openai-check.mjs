@@ -66,23 +66,34 @@ async function check(name, fn) {
 let nextOpenAi = { status: 200, body: { choices: [{ message: { content: 'pong' } }] } };
 let aisensyStatus = 200;
 let hangNext = false;
+let openAiDelayMs = 0; // widens the window so the concurrency test really races
 const sent = [];
+/** Destinations the stub should reject, for the partial-failure case. */
+const aisensyFailFor = new Set();
+let openAiHits = 0;
 
 const stub = createServer(async (req, res) => {
   let raw = '';
   for await (const c of req) raw += c;
 
   if (req.url.startsWith('/aisensy')) {
+    let body = {};
     try {
-      sent.push(JSON.parse(raw || '{}'));
+      body = JSON.parse(raw || '{}');
     } catch {
-      sent.push({ unparseable: raw });
+      body = { unparseable: raw };
     }
-    res.writeHead(aisensyStatus, { 'content-type': 'application/json' });
-    return res.end(JSON.stringify(aisensyStatus === 200 ? { success: true } : { error: 'stub failure' }));
+    const rejected = aisensyStatus !== 200 || aisensyFailFor.has(body.destination);
+    // Only successful deliveries are recorded as "sent" — a rejected one must
+    // not count as a message the recipient received.
+    if (!rejected) sent.push(body);
+    res.writeHead(rejected ? 500 : 200, { 'content-type': 'application/json' });
+    return res.end(JSON.stringify(rejected ? { error: 'stub failure' } : { success: true }));
   }
 
+  openAiHits++;
   if (hangNext) return; // never respond — exercises the probe timeout
+  if (openAiDelayMs) await new Promise((r) => setTimeout(r, openAiDelayMs));
   res.writeHead(nextOpenAi.status, { 'content-type': 'application/json' });
   res.end(JSON.stringify(nextOpenAi.body));
 });
@@ -121,8 +132,23 @@ async function waitFor(fn, what, ms = 120_000) {
 /** Wipe the alert episode so each scenario is judged on its own. */
 async function resetEpisode(db, id) {
   await db.query('update openai_accounts set alerted = false, last_alerted_at = null where id = $1', [id]);
+  await db.query('update openai_account_contacts set alerted_at = null where openai_account_id = $1', [id]);
   await db.query("update alerts set status = 'resolved' where source_kind = 'openai' and source_id = $1", [id]);
 }
+
+/** Make a project eligible for the next daily run: due, enabled, unclaimed. */
+async function makeDue(db, id) {
+  await db.query(
+    `update openai_accounts
+        set last_checked_at = null, check_claimed_at = null, daily_check_enabled = true
+      where id = $1`,
+    [id]
+  );
+}
+
+/** Fire the once-daily scheduled run the way the Vercel cron does. */
+const runDaily = () =>
+  req('GET', '/api/cron/check-all?openai=daily', undefined, { authorization: `Bearer ${CRON_SECRET}` });
 
 const row1 = async (db, sql, params) => (await db.query(sql, params)).rows[0];
 const rows = async (db, sql, params) => (await db.query(sql, params)).rows;
@@ -156,22 +182,51 @@ async function main() {
     }
   });
 
-  await check('migration 21 keeps the columns the checker needs', () => {
+  await check('the columns the checker needs are present', () => {
     for (const need of [
       'client_id',
       'name',
       'label',
       'credentials_encrypted',
       'alert_name',
-      'alert_phone',
       'status',
       'alerted',
       'last_alerted_at',
       'last_checked_at',
       'last_check_error',
+      // added by migration 22
+      'daily_check_enabled',
+      'check_claimed_at',
     ]) {
       assert.ok(cols.includes(need), `column ${need} is missing`);
     }
+  });
+
+  await check('migration 22 moved recipients out to their own table', async () => {
+    assert.ok(
+      !cols.includes('alert_phone'),
+      'openai_accounts.alert_phone still exists — recipients should live in openai_account_contacts'
+    );
+    const contactCols = (
+      await rows(db, `select column_name from information_schema.columns where table_name = 'openai_account_contacts'`)
+    ).map((r) => r.column_name);
+    for (const need of ['openai_account_id', 'phone', 'alerted_at', 'created_at', 'updated_at']) {
+      assert.ok(contactCols.includes(need), `openai_account_contacts.${need} is missing`);
+    }
+  });
+
+  await check('the same number cannot be added to one project twice', async () => {
+    const acct = await row1(db, 'select id from openai_accounts limit 1');
+    if (!acct) return; // nothing seeded yet; the API-level test covers this too
+    await assert.rejects(
+      () =>
+        db.query(
+          `insert into openai_account_contacts (openai_account_id, phone)
+           values ($1, '+91dupe'), ($1, '+91dupe')`,
+          [acct.id]
+        ),
+      /openai_account_contacts_unique|duplicate key/
+    );
   });
 
   const client = await row1(
@@ -243,7 +298,7 @@ async function main() {
       name: 'ABC Production',
       api_key: SECRET_KEY,
       alert_name: 'Ops Person',
-      alert_phone: '+910000000002',
+      phones: ['+910000000002'],
     });
 
     await check('POST /api/openai-accounts creates the project', () => {
@@ -251,9 +306,16 @@ async function main() {
       assert.equal(created.json.name, 'ABC Production');
       assert.equal(created.json.has_key, true);
       assert.equal(created.json.status, 'CHECK_FAILED', 'a new project must start unchecked');
+      assert.equal(created.json.daily_check_enabled, true, 'a new project must default to daily checking ON');
     });
     const id = created.json.id;
     assert.ok(id, 'no account was created — the rest of the test cannot run');
+
+    // Every other project in this database is taken off the daily schedule, so
+    // the OpenAI request counts below measure only the project under test. The
+    // pre-migration "Legacy Project" in particular is enabled and has a
+    // recipient, and would otherwise be claimed by every daily run here.
+    await db.query('update openai_accounts set daily_check_enabled = false where id <> $1', [id]);
 
     await check('the create response exposes only a masked key hint', () => {
       assert.ok(!created.text.includes(SECRET_KEY), 'the raw key appeared in the create response');
@@ -533,6 +595,278 @@ async function main() {
         assert.equal(r.status, 200, `HTTP ${r.status}: ${r.text.slice(0, 200)}`);
       });
     }
+
+    // ---- multiple recipients ------------------------------------------------
+    const THREE = ['+910000000002', '+910000000003', '+910000000004'];
+
+    await check('a project can hold several numbers', async () => {
+      const r = await req('PATCH', `/api/openai-accounts/${id}`, { phones: THREE });
+      assert.equal(r.status, 200, r.text);
+      assert.deepEqual(r.json.phones, THREE);
+      const list = await req('GET', '/api/openai-accounts');
+      assert.deepEqual(list.json.find((a) => a.id === id).phones, THREE);
+    });
+
+    await check('NO_CREDIT messages every configured number exactly once', async () => {
+      await resetEpisode(db, id);
+      sent.length = 0;
+      nextOpenAi = quota;
+      await req('POST', `/api/openai-accounts/${id}/check`);
+      assert.equal(sent.length, 3, `expected 3 messages, got ${sent.length}`);
+      assert.deepEqual(
+        sent.map((m) => m.destination).sort(),
+        ['910000000002', '910000000003', '910000000004'],
+        'the three configured numbers were not the ones messaged'
+      );
+      for (const m of sent) assert.equal(m.templateParams[2], 'NO CREDIT');
+    });
+
+    await check('staying NO_CREDIT re-messages nobody', async () => {
+      await req('POST', `/api/openai-accounts/${id}/check`);
+      await req('POST', `/api/openai-accounts/${id}/check`);
+      assert.equal(sent.length, 3, `${sent.length} messages after three consecutive NO_CREDIT checks`);
+    });
+
+    await check('recovery clears every recipient latch and sends nothing', async () => {
+      nextOpenAi = { status: 200, body: { choices: [] } };
+      await req('POST', `/api/openai-accounts/${id}/check`);
+      assert.equal(sent.length, 3, 'a recovery message was sent');
+      const latched = await rows(
+        db,
+        'select 1 from openai_account_contacts where openai_account_id = $1 and alerted_at is not null',
+        [id]
+      );
+      assert.equal(latched.length, 0, 'a recipient latch survived the recovery');
+    });
+
+    await check('a relapse messages all three again, once each', async () => {
+      nextOpenAi = quota;
+      await req('POST', `/api/openai-accounts/${id}/check`);
+      assert.equal(sent.length, 6, `expected 3 more messages, total 6, got ${sent.length}`);
+      assert.deepEqual(
+        sent.slice(3).map((m) => m.destination).sort(),
+        ['910000000002', '910000000003', '910000000004']
+      );
+    });
+
+    await check('a removed number is not messaged again', async () => {
+      await req('PATCH', `/api/openai-accounts/${id}`, { phones: THREE.slice(0, 2) });
+      await resetEpisode(db, id);
+      sent.length = 0;
+      nextOpenAi = quota;
+      await req('POST', `/api/openai-accounts/${id}/check`);
+      assert.equal(sent.length, 2, `expected 2 messages after removing one number, got ${sent.length}`);
+      assert.ok(
+        !sent.some((m) => m.destination === '910000000004'),
+        'the removed number was still messaged'
+      );
+      await req('PATCH', `/api/openai-accounts/${id}`, { phones: THREE }); // restore
+    });
+
+    await check('one failed delivery does not mark the episode done for everyone', async () => {
+      await resetEpisode(db, id);
+      sent.length = 0;
+      aisensyFailFor.add('910000000003');
+      nextOpenAi = quota;
+      await req('POST', `/api/openai-accounts/${id}/check`);
+
+      assert.equal(sent.length, 2, `expected 2 delivered, got ${sent.length}`);
+      const stillOwed = await rows(
+        db,
+        `select phone from openai_account_contacts
+          where openai_account_id = $1 and alerted_at is null`,
+        [id]
+      );
+      assert.deepEqual(
+        stillOwed.map((r) => r.phone),
+        ['+910000000003'],
+        'the failed recipient should be the only one still owed a message'
+      );
+      const incident = await rows(
+        db,
+        "select whatsapp_sent, whatsapp_error from alerts where source_kind='openai' and source_id=$1 and status='active'",
+        [id]
+      );
+      assert.equal(incident[0].whatsapp_sent, true, 'two recipients did receive it');
+      assert.match(incident[0].whatsapp_error ?? '', /910000000003/, 'the failure was not recorded');
+    });
+
+    await check('the next check retries only the recipient that failed', async () => {
+      aisensyFailFor.clear();
+      sent.length = 0;
+      await req('POST', `/api/openai-accounts/${id}/check`);
+      assert.equal(sent.length, 1, `expected only the failed recipient to be retried, got ${sent.length}`);
+      assert.equal(sent[0].destination, '910000000003');
+    });
+
+    await check('a project keeps the number migrated from its old alert_phone', async () => {
+      const legacy = await row1(
+        db,
+        `select a.id, k.phone from openai_accounts a
+           join openai_account_contacts k on k.openai_account_id = a.id
+          where a.name = 'Legacy Project'`
+      );
+      assert.ok(legacy, 'the pre-migration project lost its recipient');
+      assert.equal(legacy.phone, '+919111100000');
+    });
+
+    // ---- daily-check toggle -------------------------------------------------
+    await check('the daily run checks an enabled, due project', async () => {
+      await resetEpisode(db, id);
+      await makeDue(db, id);
+      nextOpenAi = { status: 200, body: { choices: [] } };
+      const r = await runDaily();
+      assert.equal(r.json.openai_daily, true);
+      assert.ok(r.json.openai_claimed >= 1, `nothing was claimed: ${r.text}`);
+      const row = await row1(db, 'select status, last_checked_at from openai_accounts where id = $1', [id]);
+      assert.equal(row.status, 'CREDIT_AVAILABLE');
+      assert.ok(row.last_checked_at, 'last_checked_at was not stamped by the daily run');
+    });
+
+    await check('an already-checked project is not checked twice the same day', async () => {
+      const before = openAiHits;
+      await runDaily();
+      assert.equal(openAiHits, before, 'a second daily run re-probed a project checked today');
+    });
+
+    await check('a disabled project is skipped by the daily run and never sent to OpenAI', async () => {
+      await makeDue(db, id);
+      await req('PATCH', `/api/openai-accounts/${id}`, { daily_check_enabled: false });
+      sent.length = 0;
+      const before = openAiHits;
+      nextOpenAi = quota; // would alert loudly if it were checked
+      const r = await runDaily();
+      assert.equal(openAiHits, before, 'a disabled project was sent to OpenAI by the scheduled run');
+      assert.equal(r.json.openai_claimed, 0, 'a disabled project was claimed');
+      assert.equal(sent.length, 0, 'a disabled project produced a scheduled WhatsApp');
+      const row = await row1(db, 'select status from openai_accounts where id = $1', [id]);
+      assert.notEqual(row.status, 'NO_CREDIT', 'the disabled project’s status was changed by the scheduler');
+    });
+
+    await check('manual "Check now" still works on a disabled project', async () => {
+      const before = openAiHits;
+      nextOpenAi = { status: 200, body: { choices: [] } };
+      const r = await req('POST', `/api/openai-accounts/${id}/check`);
+      assert.equal(r.json.status, 'CREDIT_AVAILABLE', `manual check refused: ${r.text}`);
+      assert.equal(openAiHits, before + 1, 'the manual check did not reach OpenAI');
+      await req('PATCH', `/api/openai-accounts/${id}`, { daily_check_enabled: true }); // restore
+    });
+
+    // ---- schedule configuration --------------------------------------------
+    await check('vercel.json declares exactly one daily cron at 09:00 Asia/Kolkata', async () => {
+      const cfg = JSON.parse(await readFile('vercel.json', 'utf8'));
+      assert.equal(cfg.crons.length, 1, `expected 1 cron entry, found ${cfg.crons.length}`);
+      const [entry] = cfg.crons;
+      assert.equal(entry.schedule, '30 3 * * *', `expected 03:30 UTC, got "${entry.schedule}"`);
+
+      // Convert the expression to IST rather than trusting the comment.
+      const [min, hour] = entry.schedule.split(' ');
+      const istMinutes = Number(hour) * 60 + Number(min) + 330; // Asia/Kolkata = UTC+05:30
+      assert.equal(
+        `${String(Math.floor(istMinutes / 60)).padStart(2, '0')}:${String(istMinutes % 60).padStart(2, '0')}`,
+        '09:00',
+        'the cron expression does not land on 09:00 IST'
+      );
+      assert.match(entry.path, /openai=daily/, 'the daily cron does not carry the OpenAI trigger flag');
+    });
+
+    await check('the 5-minute Actions workflow cannot trigger an OpenAI check', async () => {
+      const wf = await readFile('.github/workflows/monitor-cron.yml', 'utf8');
+      assert.ok(
+        !wf.includes('openai=daily'),
+        'the 5-minute workflow now carries the daily-trigger flag, making it a second trigger'
+      );
+
+      // The bare path is exactly what that workflow calls.
+      await makeDue(db, id);
+      const before = openAiHits;
+      const r = await req('GET', '/api/cron/check-all', undefined, {
+        authorization: `Bearer ${CRON_SECRET}`,
+      });
+      assert.equal(r.status, 200, r.text);
+      assert.equal(r.json.openai_daily, false, 'the bare path claimed to be the daily trigger');
+      assert.equal(openAiHits, before, 'the 5-minute poll sent a request to OpenAI');
+      assert.ok('vms_checked' in r.json, 'the bare path stopped doing its VM work');
+    });
+
+    await check('due_since is the most recent 09:00 IST boundary', async () => {
+      const r = await runDaily();
+      const due = new Date(r.json.openai_due_since);
+      assert.equal(due.getUTCHours(), 3, `expected 03:30 UTC, got ${due.toISOString()}`);
+      assert.equal(due.getUTCMinutes(), 30);
+      assert.ok(due.getTime() <= Date.now(), 'the boundary is in the future');
+      assert.ok(Date.now() - due.getTime() < 86_400_000, 'the boundary is more than a day old');
+    });
+
+    await check('a project checked after the boundary is not due; before it, is', async () => {
+      const { openai_due_since } = (await runDaily()).json;
+      const boundary = new Date(openai_due_since).getTime();
+
+      await db.query(
+        'update openai_accounts set last_checked_at = $2, check_claimed_at = null where id = $1',
+        [id, new Date(boundary + 60_000).toISOString()]
+      );
+      let before = openAiHits;
+      await runDaily();
+      assert.equal(openAiHits, before, 'a project checked after the boundary was re-checked');
+
+      await db.query(
+        'update openai_accounts set last_checked_at = $2, check_claimed_at = null where id = $1',
+        [id, new Date(boundary - 60_000).toISOString()]
+      );
+      before = openAiHits;
+      nextOpenAi = { status: 200, body: { choices: [] } };
+      await runDaily();
+      assert.equal(openAiHits, before + 1, 'a project last checked before the boundary was not re-checked');
+    });
+
+    // ---- concurrency --------------------------------------------------------
+    await check('two simultaneous daily runs check the project only once', async () => {
+      await resetEpisode(db, id);
+      await makeDue(db, id);
+      sent.length = 0;
+      nextOpenAi = quota; // out of credit, so a double-check would double-alert too
+      openAiDelayMs = 400; // hold the first probe open so the runs really overlap
+
+      const before = openAiHits;
+      const [a, b] = await Promise.all([runDaily(), runDaily()]);
+      openAiDelayMs = 0;
+
+      assert.equal(
+        openAiHits - before,
+        1,
+        `the project was sent to OpenAI ${openAiHits - before} times by two concurrent runs`
+      );
+      assert.equal(
+        (a.json.openai_claimed ?? 0) + (b.json.openai_claimed ?? 0),
+        1,
+        `exactly one invocation should have claimed it — got ${a.json.openai_claimed} and ${b.json.openai_claimed}`
+      );
+      assert.equal(sent.length, 3, `expected one message per recipient, got ${sent.length}`);
+    });
+
+    await check('an expired claim is reclaimed, so a crashed run loses nothing', async () => {
+      await resetEpisode(db, id);
+      await makeDue(db, id);
+      // Simulate an invocation that claimed the project and then died: the claim
+      // is present but older than the 10-minute lease.
+      await db.query(
+        "update openai_accounts set check_claimed_at = now() - interval '11 minutes' where id = $1",
+        [id]
+      );
+      const before = openAiHits;
+      nextOpenAi = { status: 200, body: { choices: [] } };
+      await runDaily();
+      assert.equal(openAiHits, before + 1, 'a project whose claim had expired was never retried');
+    });
+
+    await check('a live claim is respected', async () => {
+      await makeDue(db, id);
+      await db.query('update openai_accounts set check_claimed_at = now() where id = $1', [id]);
+      const before = openAiHits;
+      await runDaily();
+      assert.equal(openAiHits, before, 'a project claimed seconds ago was checked by another run');
+    });
 
     await check('deleting the project closes its incident', async () => {
       await resetEpisode(db, id);

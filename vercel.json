@@ -1,8 +1,22 @@
 {
+  "$comment": [
+    "ONE cron entry, ONE execution per day — Vercel's Hobby plan allows no more.",
+    "",
+    "03:30 UTC = 09:00 Asia/Kolkata. India is UTC+05:30 and has never observed",
+    "daylight saving, so this lands on 09:00 IST every day of the year with no",
+    "seasonal correction needed.",
+    "",
+    "?openai=daily is what makes this the ONLY trigger for the OpenAI project",
+    "checks. The same route is called every 5 minutes by",
+    ".github/workflows/monitor-cron.yml for VM/app monitoring, and without the",
+    "flag that poll would become the de-facto trigger — each OpenAI check is a",
+    "real billable request. The workflow calls the bare path and does no OpenAI",
+    "work; only this entry carries the flag."
+  ],
   "crons": [
     {
-      "path": "/api/cron/check-all",
-      "schedule": "0 0 * * *"
+      "path": "/api/cron/check-all?openai=daily",
+      "schedule": "30 3 * * *"
     }
   ]
 }

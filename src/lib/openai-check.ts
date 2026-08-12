@@ -13,10 +13,15 @@
 //
 // Nothing about WhatsApp is re-implemented. Delivery goes through
 // src/lib/alerts.ts -> src/lib/aisensy.ts, incidents land in the same `alerts`
-// table under source_kind 'openai', and the recipient resolves account phone ->
-// client phone exactly as the VM alerter resolves it.
+// table under source_kind 'openai', and a project with no recipients of its own
+// falls back to its client's number exactly as the VM alerter does.
+//
+// WHEN IT RUNS: once a day, at 09:00 Asia/Kolkata, driven by the single cron
+// entry in vercel.json. See `dailyDueSince` and `claimDueAccounts` below for the
+// two safeguards that make a duplicated or late trigger harmless — neither of
+// them ever CAUSES a check.
 
-import { maybeOne, sql, updateById } from '@/lib/db';
+import { exec, maybeOne, sql, updateById } from '@/lib/db';
 import { decrypt } from '@/lib/crypto';
 import { getAisensyConfig } from '@/lib/aisensy';
 import { closeOrphanedIncidents, openIncident, resolveIncident, sendWhatsApp } from '@/lib/alerts';
@@ -64,13 +69,47 @@ export interface OpenAiAccountRow {
   credentials_encrypted: string | null;
   status: string;
   alerted: boolean;
+  daily_check_enabled: boolean;
   last_checked_at: string | null;
   last_alerted_at: string | null;
   alert_name: string | null;
-  alert_phone: string | null;
   client_name?: string | null;
   client_alert_name?: string | null;
   client_alert_phone?: string | null;
+}
+
+// --- daily schedule --------------------------------------------------------
+
+/**
+ * Asia/Kolkata is UTC+05:30 and India has never observed daylight saving, so a
+ * fixed offset is exact all year and no timezone library is needed. 09:00 IST
+ * is therefore always 03:30 UTC — which is the cron expression in vercel.json.
+ */
+export const IST_OFFSET_MS = 5.5 * 60 * 60_000;
+export const DAILY_CHECK_HOUR_IST = 9;
+
+/** How long one invocation's claim on a project is respected. */
+export const CLAIM_LEASE_MS = 10 * 60_000;
+
+/**
+ * The most recent 09:00 Asia/Kolkata that has already passed.
+ *
+ * A project is due when it has not been checked since that instant. This is a
+ * guard, not a schedule: the cron fires once a day and does the work, and this
+ * is what stops a retried or hand-fired trigger from doing it a second time.
+ */
+export function dailyDueSince(now: number = Date.now()): Date {
+  const ist = now + IST_OFFSET_MS;
+  const d = new Date(ist);
+  const boundary = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), DAILY_CHECK_HOUR_IST);
+  // Before 09:00 IST today, the live boundary is yesterday's.
+  const due = boundary <= ist ? boundary : boundary - 86_400_000;
+  return new Date(due - IST_OFFSET_MS);
+}
+
+/** Milliseconds until the next 09:00 IST — used to align the self-hosted timer. */
+export function msUntilNextDailyCheck(now: number = Date.now()): number {
+  return dailyDueSince(now).getTime() + 86_400_000 - now;
 }
 
 /**
@@ -176,9 +215,13 @@ export async function probeKey(apiKey: string): Promise<CheckResult> {
   }
 }
 
+// Columns the checker needs. Listed explicitly so the ciphertext is only ever
+// pulled where it is about to be decrypted.
+const ACCOUNT_COLS = `a.id, a.client_id, a.name, a.credentials_encrypted, a.status, a.alerted,
+         a.daily_check_enabled, a.last_checked_at, a.last_alerted_at, a.alert_name`;
+
 const SELECT_WITH_CLIENT = `
-  select a.id, a.client_id, a.name, a.credentials_encrypted, a.status, a.alerted,
-         a.last_checked_at, a.last_alerted_at, a.alert_name, a.alert_phone,
+  select ${ACCOUNT_COLS},
          c.name        as client_name,
          c.alert_name  as client_alert_name,
          c.alert_phone as client_alert_phone
@@ -190,17 +233,65 @@ export async function loadAccountForCheck(id: string): Promise<OpenAiAccountRow 
   return maybeOne<OpenAiAccountRow>(`${SELECT_WITH_CLIENT} where a.id = $1`, [id]);
 }
 
+// --- recipients ------------------------------------------------------------
+
 /**
- * Alert the contact when an account ENTERS the no-credit state, and close the
+ * One WhatsApp destination for a project. `id` is the openai_account_contacts
+ * row, or null for the client-level fallback, which has no row of its own and
+ * is latched on the account instead.
+ */
+interface Recipient {
+  id: string | null;
+  phone: string;
+  alerted_at: string | null;
+}
+
+/**
+ * Everyone who should hear about this project, and whether they already have.
+ *
+ * A project's own contacts win outright. Only when it has none at all does the
+ * client's number stand in — preserving the behaviour projects had before they
+ * could hold a list of their own.
+ */
+async function recipientsFor(acct: OpenAiAccountRow): Promise<Recipient[]> {
+  const own = await sql<Recipient>(
+    `select id, phone, alerted_at
+       from openai_account_contacts
+      where openai_account_id = $1
+      order by created_at asc`,
+    [acct.id]
+  );
+  if (own.length) return own;
+  if (acct.client_alert_phone) {
+    // The fallback's "already told" state is the account latch, since there is
+    // no contact row to stamp.
+    return [{ id: null, phone: acct.client_alert_phone, alerted_at: acct.alerted ? acct.last_alerted_at : null }];
+  }
+  return [];
+}
+
+/** Clear every recipient's episode latch, so a relapse messages them all again. */
+async function clearRecipientLatches(accountId: string): Promise<void> {
+  await exec(
+    `update openai_account_contacts set alerted_at = null, updated_at = now()
+      where openai_account_id = $1 and alerted_at is not null`,
+    [accountId]
+  );
+}
+
+/**
+ * Alert every recipient when a project ENTERS the no-credit state, and close the
  * incident when it leaves.
  *
- * Duplicate protection is a pure edge transition, which is why this is a few
- * lines rather than the scheduled scan the credit tracker needed: `alerted` is
- * the record of "a message has already gone out for this episode". It is set
- * ONLY when a send actually succeeded, so an account with no phone number — or
- * one whose delivery failed — is picked up again on the next check instead of
- * being marked done and going quiet. Leaving NO_CREDIT clears it, so a later
- * relapse alerts again.
+ * ONE MESSAGE PER RECIPIENT PER EPISODE. The latch is per-recipient
+ * (openai_account_contacts.alerted_at), not per-project, because with several
+ * numbers a single project-level flag cannot express it: if two of three sends
+ * succeed, setting the flag abandons the third forever and clearing it
+ * re-messages the two who already know, every single check. Sending only to
+ * contacts whose latch is still NULL gives exactly the required behaviour —
+ * everyone hears once, a failed delivery is retried on the next check, and
+ * nobody is told twice. Recovery clears every latch, so a relapse messages the
+ * whole list again.
  *
  * INVALID_KEY and CHECK_FAILED deliberately message nobody. Neither means the
  * client is out of credit, and a checker that cries wolf about its own
@@ -208,40 +299,85 @@ export async function loadAccountForCheck(id: string): Promise<OpenAiAccountRow 
  */
 async function handleAlert(acct: OpenAiAccountRow, result: CheckResult): Promise<void> {
   if (result.status === 'NO_CREDIT') {
-    if (acct.alerted) return; // already told them about this episode
+    const clientName = acct.client_name || '';
+    const description =
+      'OpenAI reports insufficient quota/credit for this project, so it cannot make API requests' +
+      (clientName ? ` · ${clientName}` : '');
+    const content = {
+      severity: 'critical' as const,
+      title: `${acct.name} — OpenAI requests blocked`,
+      description,
+    };
+    const target = { id: acct.id, client_id: acct.client_id };
+
+    const recipients = await recipientsFor(acct);
+
+    // Nobody to tell. Still log the incident — "we could not reach anyone" is
+    // exactly the state an operator has to be able to see. openIncident is
+    // insert-or-refresh, so repeating this on later checks adds no rows.
+    if (!recipients.length) {
+      await openIncident('openai', target, content, {
+        sent: false,
+        error: 'No WhatsApp recipient configured for this project or its client.',
+      });
+      return;
+    }
+
+    const pending = recipients.filter((r) => !r.alerted_at);
+    if (!pending.length) return; // everyone has already been told about this episode
 
     const cfg = await getAisensyConfig();
     // Credit alerts prefer their own approved template; blank falls back to the
     // downtime one inside sendAisensy.
     const campaign = cfg.credits_campaign?.trim() || undefined;
-    const phone = acct.alert_phone || acct.client_alert_phone || '';
     const who = acct.alert_name || acct.client_alert_name || undefined;
-    const clientName = acct.client_name || '';
 
-    // Same 4-variable contract as every other alert in the app, so no new AI
-    // Sensy template needs approving: [name, client, status, detail].
-    const d = await sendWhatsApp(
-      cfg,
-      phone,
-      who,
-      [acct.name, clientName, 'NO CREDIT', 'OpenAI reports quota/credit exhausted'],
-      campaign
-    );
+    // Sequential, not parallel: the lists are short and AI Sensy is a rate-limited
+    // third party, so a burst buys nothing and risks 429s that would look like
+    // delivery failures.
+    const delivered: string[] = []; // contact-row ids to stamp
+    const failures: string[] = [];
+    let sentCount = 0;
+    for (const r of pending) {
+      // Same 4-variable contract as every other alert in the app, so no new AI
+      // Sensy template needs approving: [name, client, status, detail].
+      const d = await sendWhatsApp(
+        cfg,
+        r.phone,
+        who,
+        [acct.name, clientName, 'NO CREDIT', 'OpenAI reports quota/credit exhausted'],
+        campaign
+      );
+      if (d.sent) {
+        sentCount++;
+        // The client fallback has no row to stamp; the account latch below is
+        // what stops it being messaged again.
+        if (r.id) delivered.push(r.id);
+      } else {
+        failures.push(`${r.phone}: ${d.error ?? 'send failed'}`);
+      }
+    }
 
-    await openIncident(
-      'openai',
-      { id: acct.id, client_id: acct.client_id },
-      {
-        severity: 'critical',
-        title: `${acct.name} — OpenAI requests blocked`,
-        description:
-          'OpenAI reports insufficient quota/credit for this project, so it cannot make API requests' +
-          (clientName ? ` · ${clientName}` : ''),
-      },
-      d
-    );
+    // Stamp only the recipients actually reached. Anyone missing stays NULL and
+    // is retried next check, without re-messaging the ones who got through.
+    if (delivered.length) {
+      await exec(
+        `update openai_account_contacts set alerted_at = now(), updated_at = now() where id = any($1::uuid[])`,
+        [delivered]
+      );
+    }
 
-    if (d.sent) {
+    await openIncident('openai', target, content, {
+      sent: sentCount > 0,
+      // Partial failure is recorded in full rather than collapsed into "sent",
+      // so the Alerts page shows which numbers were not reached.
+      error: failures.length ? failures.join('; ') : null,
+    });
+
+    // The account latch means "at least one person knows". It drives the UI and
+    // the fallback recipient; the per-contact latches are what actually decide
+    // who gets messaged next time.
+    if (sentCount > 0) {
       await updateById('openai_accounts', acct.id, {
         alerted: true,
         last_alerted_at: new Date().toISOString(),
@@ -275,6 +411,11 @@ async function handleAlert(acct: OpenAiAccountRow, result: CheckResult): Promise
   // thing that cannot strand one.
   await resolveIncident('openai', acct.id, null);
 
+  // Every recipient's latch is cleared too, so if this project runs out again
+  // tomorrow the whole list is messaged afresh rather than staying silent
+  // because they were told about the previous episode.
+  await clearRecipientLatches(acct.id);
+
   if (acct.alerted) {
     await updateById('openai_accounts', acct.id, { alerted: false, last_alerted_at: null });
   }
@@ -283,6 +424,11 @@ async function handleAlert(acct: OpenAiAccountRow, result: CheckResult): Promise
 /**
  * Check one account: decrypt its key, probe, store the outcome, then alert on a
  * transition into or out of NO_CREDIT.
+ *
+ * FORCED. It does not consult daily_check_enabled, the due-gate or the claim —
+ * that flag governs the SCHEDULED run only, so "Check now" keeps working on a
+ * project whose daily checking is switched off. Callers that represent the
+ * scheduler go through runDailyOpenAiChecks() instead.
  *
  * The decrypted key exists only inside this function and is never returned,
  * stored or logged. Failures are identified by account name only.
@@ -321,22 +467,10 @@ export async function checkOpenAiAccount(acct: OpenAiAccountRow): Promise<CheckR
   return { id: acct.id, ...result };
 }
 
-/**
- * Check every account. Never rejects — one bad key must not stop the rest.
- *
- * `staleMs` skips accounts checked more recently than that, so the 5-minute cron
- * can call this without probing every key every five minutes. Omit it to force a
- * refresh, which is what the UI's "Check now" does.
- */
-export async function checkAllOpenAiAccounts(staleMs?: number): Promise<Array<CheckResult & { id: string }>> {
-  const all = await sql<OpenAiAccountRow>(`${SELECT_WITH_CLIENT} order by a.created_at asc`);
-  const due =
-    staleMs == null
-      ? all
-      : all.filter((a) => !a.last_checked_at || Date.now() - new Date(a.last_checked_at).getTime() >= staleMs);
-
+/** Run a set of accounts. Never rejects — one bad key must not stop the rest. */
+function checkEach(accounts: OpenAiAccountRow[]): Promise<Array<CheckResult & { id: string }>> {
   return Promise.all(
-    due.map((a) =>
+    accounts.map((a) =>
       checkOpenAiAccount(a).catch((e) => ({
         id: a.id,
         status: 'CHECK_FAILED' as const,
@@ -346,11 +480,80 @@ export async function checkAllOpenAiAccounts(staleMs?: number): Promise<Array<Ch
   );
 }
 
-/** Sweep incidents whose account was deleted, then check everything due. */
-export async function syncOpenAiChecks(staleMs?: number): Promise<{ checked: number }> {
-  // A deleted account cannot close its own incident — checkAllOpenAiAccounts
-  // only iterates rows that still exist.
+/**
+ * Atomically take ownership of every project that is enabled and due.
+ *
+ * ONE STATEMENT SELECTS AND CLAIMS, which is the whole point. Reading the due
+ * rows and then probing them would be a check-then-act with seconds of daylight
+ * in between, and a cron that fires twice — a retry, a hand-run
+ * workflow_dispatch, two hosts — would have both invocations see the same
+ * project as due, both spend a billable request, and both send the same
+ * WhatsApp.
+ *
+ * Why the race cannot happen here: under READ COMMITTED, a second UPDATE
+ * reaching a row this one has locked blocks until this one commits, then
+ * RE-EVALUATES its WHERE against the updated row. By then check_claimed_at is
+ * now(), so the `check_claimed_at < lease cutoff` test fails, the row is not in
+ * the second statement's result, and the second caller never sees it. Exactly
+ * one invocation gets each project.
+ *
+ * Each statement is its own autocommit transaction, so nothing is held open
+ * across the OpenAI HTTP call — which matters with PGPOOL_MAX=3. The lease makes
+ * it crash-safe: a run killed mid-flight (the 60s maxDuration cut-off this route
+ * has a history of) releases its projects after CLAIM_LEASE_MS instead of
+ * leaving them unchecked until tomorrow.
+ *
+ * `client_id` is NOT NULL with a foreign key, so joining clients cannot drop a
+ * row from the claim.
+ */
+async function claimDueAccounts(dueSince: Date): Promise<OpenAiAccountRow[]> {
+  return sql<OpenAiAccountRow>(
+    `update openai_accounts a
+        set check_claimed_at = now()
+       from clients c
+      where c.id = a.client_id
+        and a.daily_check_enabled
+        and (a.last_checked_at  is null or a.last_checked_at  < $1)
+        and (a.check_claimed_at is null or a.check_claimed_at < $2)
+    returning ${ACCOUNT_COLS},
+              c.name        as client_name,
+              c.alert_name  as client_alert_name,
+              c.alert_phone as client_alert_phone`,
+    [dueSince.toISOString(), new Date(Date.now() - CLAIM_LEASE_MS).toISOString()]
+  );
+}
+
+/**
+ * THE scheduled entry point — one run a day, from the single cron entry in
+ * vercel.json (03:30 UTC = 09:00 Asia/Kolkata).
+ *
+ * Projects with daily_check_enabled = false are excluded in SQL, so a disabled
+ * project is never sent to OpenAI and can never produce a scheduled alert.
+ * A project that has never been checked counts as due, so a key added during the
+ * day is verified promptly rather than sitting unverified until morning.
+ */
+export async function runDailyOpenAiChecks(): Promise<{
+  checked: number;
+  claimed: number;
+  due_since: string;
+}> {
+  // A deleted account cannot close its own incident — the claim below only
+  // returns rows that still exist.
   await closeOrphanedIncidents();
-  const outcomes = await checkAllOpenAiAccounts(staleMs);
+  const dueSince = dailyDueSince();
+  const claimed = await claimDueAccounts(dueSince);
+  const outcomes = await checkEach(claimed);
+  return { checked: outcomes.length, claimed: claimed.length, due_since: dueSince.toISOString() };
+}
+
+/**
+ * Manual "check everything now" from the UI. Forced: it ignores the daily
+ * schedule, the due-gate and the claim, because an operator pressing a button is
+ * not the scheduler. daily_check_enabled is ignored too — see checkOpenAiAccount.
+ */
+export async function runManualOpenAiChecks(): Promise<{ checked: number }> {
+  await closeOrphanedIncidents();
+  const all = await sql<OpenAiAccountRow>(`${SELECT_WITH_CLIENT} order by a.created_at asc`);
+  const outcomes = await checkEach(all);
   return { checked: outcomes.length };
 }

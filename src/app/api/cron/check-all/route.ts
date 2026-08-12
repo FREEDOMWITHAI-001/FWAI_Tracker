@@ -3,14 +3,10 @@ import { sql } from '@/lib/db';
 import { ok, bad, guard } from '@/lib/api';
 import { checkVm, checkApp } from '@/lib/checks';
 import { runAlerts } from '@/lib/alerts';
-import { syncOpenAiChecks } from '@/lib/openai-check';
+import { runDailyOpenAiChecks } from '@/lib/openai-check';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60; // up to 60s on Vercel — plenty for a fleet of a few VMs
-
-// Each OpenAI check is a real billable request, so don't re-probe a project more
-// than hourly however often the cron fires.
-const OPENAI_STALE_MS = 60 * 60_000;
 
 /**
  * Constant-time string comparison, so a caller cannot recover the secret by
@@ -81,16 +77,28 @@ export async function GET(req: Request) {
     // maxDuration and the function was killed before any no-credit WhatsApp
     // could be sent — silently, because a killed function reports no error.
     //
-    // Only projects unchecked for an hour are probed, so this is cheap on a
-    // 5-minute cron.
+    // GATED ON ?openai=daily, WHICH ONLY THE DAILY CRON SENDS. This route is
+    // also hit every 5 minutes by .github/workflows/monitor-cron.yml for VM
+    // monitoring; without this guard that 5-minute poll — not the cron — would
+    // become the de-facto trigger, and each OpenAI check is a real billable
+    // request. The single cron entry in vercel.json carries the flag and runs at
+    // 03:30 UTC = 09:00 Asia/Kolkata, so the check happens exactly once a day.
+    // Ordinary ticks do no OpenAI work at all and say so in the response.
+    const daily = new URL(req.url).searchParams.get('openai') === 'daily';
     let openaiChecked = 0;
+    let openaiClaimed = 0;
+    let openaiDueSince: string | null = null;
     let openaiOk = true;
-    try {
-      const r = await syncOpenAiChecks(OPENAI_STALE_MS);
-      openaiChecked = r.checked;
-    } catch (e: any) {
-      openaiOk = false;
-      console.error('[cron] openai check failed', e?.message);
+    if (daily) {
+      try {
+        const r = await runDailyOpenAiChecks();
+        openaiChecked = r.checked;
+        openaiClaimed = r.claimed;
+        openaiDueSince = r.due_since;
+      } catch (e: any) {
+        openaiOk = false;
+        console.error('[cron] openai daily check failed', e?.message);
+      }
     }
 
     // VMs: anything with SSH, a port, or a Health URL set.
@@ -137,7 +145,12 @@ export async function GET(req: Request) {
       vms_checked: vmsChecked,
       vms_total: vms.length,
       apps_checked: appsChecked,
+      // `openai_daily: false` is the normal state for the 5-minute VM tick — it
+      // means no OpenAI work was even attempted, not that it failed.
+      openai_daily: daily,
       openai_checked: openaiChecked,
+      openai_claimed: openaiClaimed,
+      openai_due_since: openaiDueSince,
       openai_ok: openaiOk,
       ms: Date.now() - started,
     });
