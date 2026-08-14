@@ -94,7 +94,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
     const willHavePhones = phones === null ? Number(existing.contact_count) > 0 : phones.length > 0;
     if (willBeEnabled && !willHavePhones && !existing.client_alert_phone) {
       return bad(
-        'Add at least one WhatsApp number, or set an alert number on the client, before turning on daily checking.'
+        'Add at least one WhatsApp number, or set an alert number on the client, before turning on automatic checking.'
       );
     }
 

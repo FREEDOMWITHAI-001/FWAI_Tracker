@@ -50,7 +50,7 @@ export function OpenAiAccountDialog({
     // server also accepts a client-level number as the fallback; it will say so
     // if that applies.
     if (daily && !cleaned.length) {
-      return setErr('Add at least one WhatsApp number, or switch daily checking off.');
+      return setErr('Add at least one WhatsApp number, or switch automatic checking off.');
     }
 
     setBusy(true);
@@ -180,15 +180,15 @@ export function OpenAiAccountDialog({
       </Field>
 
       <Field
-        label="Daily checking"
-        hint="When on, this project is checked once a day at 09:00 IST. When off, it is skipped by the daily run — you can still check it by hand with “Check now”."
+        label="Automatic checking"
+        hint="When on, this project is checked automatically every 5 minutes. When off, it is skipped by the automatic checks — you can still check it by hand with “Check now”."
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button
             type="button"
             className={`switch ${daily ? 'on' : ''}`}
             onClick={() => setDaily((d) => !d)}
-            aria-label="toggle daily checking"
+            aria-label="toggle automatic checking"
           >
             <i />
           </button>
