@@ -150,7 +150,11 @@ export interface OpenAiAccount {
    * the client's single number when the project has none of its own.
    */
   effective_phones?: string[];
-  /** Whether the once-daily 09:00 IST check includes this project. */
+  /**
+   * Whether the automatic 5-minute check includes this project. Named for the
+   * once-a-day schedule it originally gated; renaming the column would need a
+   * migration for no functional gain.
+   */
   daily_check_enabled: boolean;
   /** Null until the first check runs. */
   last_checked_at: string | null;

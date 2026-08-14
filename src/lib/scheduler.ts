@@ -2,7 +2,7 @@ import { exec, sql } from './db';
 import { checkVm, checkApp } from './checks';
 import { syncCloudAccount } from './cloud-sync';
 import { runAlerts } from './alerts';
-import { msUntilNextDailyCheck, runDailyOpenAiChecks } from './openai-check';
+import { runOpenAiChecks } from './openai-check';
 
 // Server-side scheduler. Started from instrumentation.ts when the Next server
 // boots, so checks run automatically even with no browser open. Stops when the
@@ -32,6 +32,12 @@ async function runChecks() {
 
     // after fresh statuses are written, evaluate alert conditions
     await runAlerts().catch((e) => console.error('[alerts] failed:', e?.message));
+
+    // OpenAI projects ride this same cycle, exactly as they do in production
+    // where /api/cron/check-all is the tick. Cheap when nothing is due: one
+    // UPDATE that claims no rows. runOpenAiChecks itself bounds how often any
+    // project is actually probed, so this interval can be anything.
+    await runOpenAiChecks().catch((e) => console.error('[openai] checks failed:', e?.message));
   } catch (e) {
     console.error('[scheduler] checks failed:', e instanceof Error ? e.message : e);
   } finally {
@@ -53,35 +59,6 @@ async function runCloudSync() {
   } catch (e) {
     console.error('[scheduler] cloud sync failed:', e instanceof Error ? e.message : e);
   }
-}
-
-// The OpenAI daily check, on a long-lived server.
-//
-// ALIGNED TIMER, NOT AN INTERVAL. setInterval(24h) started at boot would fire at
-// whatever time the process happened to start; a shorter repeating interval
-// would poll. Neither is wanted: the check belongs AT 09:00 Asia/Kolkata. So the
-// next run is scheduled for the exact millisecond offset to that boundary and
-// re-armed for the following day once it has run — one execution per day, on
-// time, with no polling in between.
-//
-// This path only matters when self-hosting. On Vercel no timer survives an
-// invocation and the single cron entry in vercel.json is the trigger.
-function armDailyOpenAiCheck() {
-  const wait = msUntilNextDailyCheck();
-  console.log(
-    `[scheduler] next OpenAI daily check in ${Math.round(wait / 60_000)} min ` +
-      `(09:00 Asia/Kolkata, ${new Date(Date.now() + wait).toISOString()})`
-  );
-  setTimeout(async () => {
-    try {
-      const r = await runDailyOpenAiChecks();
-      console.log(`[scheduler] openai daily check — ${r.checked} project(s) checked`);
-    } catch (e) {
-      console.error('[scheduler] openai daily check failed:', e instanceof Error ? e.message : e);
-    } finally {
-      armDailyOpenAiCheck(); // re-arm for tomorrow, even if this run threw
-    }
-  }, wait);
 }
 
 // Keep the history tables from growing forever.
@@ -107,13 +84,12 @@ export function startScheduler() {
   const checkMs = Number(process.env.CHECK_INTERVAL_MS) || 300_000; // 5 min default
   const cloudMs = Number(process.env.CLOUD_SYNC_INTERVAL_MS) || 300_000; // 5 min
   console.log(
-    `[scheduler] started — checks every ${checkMs / 1000}s, cloud sync every ${cloudMs / 1000}s, ` +
-      `openai once daily at 09:00 Asia/Kolkata`
+    `[scheduler] started — checks every ${checkMs / 1000}s (VMs, apps, alerts, OpenAI), ` +
+      `cloud sync every ${cloudMs / 1000}s`
   );
 
   setTimeout(runChecks, 3000); // first run shortly after boot
   setInterval(runChecks, checkMs);
   setInterval(runCloudSync, cloudMs);
-  armDailyOpenAiCheck();
   setInterval(runPrune, 3_600_000); // hourly cleanup
 }

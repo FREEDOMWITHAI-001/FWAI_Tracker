@@ -16,10 +16,16 @@
 // table under source_kind 'openai', and a project with no recipients of its own
 // falls back to its client's number exactly as the VM alerter does.
 //
-// WHEN IT RUNS: once a day, at 09:00 Asia/Kolkata, driven by the single cron
-// entry in vercel.json. See `dailyDueSince` and `claimDueAccounts` below for the
-// two safeguards that make a duplicated or late trigger harmless — neither of
-// them ever CAUSES a check.
+// WHEN IT RUNS: every 5 minutes, on the same monitoring cron that checks the
+// VMs — .github/workflows/monitor-cron.yml -> GET /api/cron/check-all. There is
+// no separate schedule and no timer; `claimAccountsToCheck` below both hands out
+// the work and bounds how often any one project can be probed.
+//
+// CHECK FREQUENCY IS NOT ALERT FREQUENCY, and the two must not be confused. The
+// probe runs every few minutes so a project that runs dry is noticed quickly.
+// The WhatsApp is governed instead by the per-recipient latch in `handleAlert`:
+// one message per recipient per no-credit episode, silence for as long as the
+// episode lasts, and a fresh message if it recovers and relapses.
 
 import { exec, maybeOne, sql, updateById } from '@/lib/db';
 import { decrypt } from '@/lib/crypto';
@@ -78,39 +84,23 @@ export interface OpenAiAccountRow {
   client_alert_phone?: string | null;
 }
 
-// --- daily schedule --------------------------------------------------------
+// --- schedule --------------------------------------------------------------
 
 /**
- * Asia/Kolkata is UTC+05:30 and India has never observed daylight saving, so a
- * fixed offset is exact all year and no timezone library is needed. 09:00 IST
- * is therefore always 03:30 UTC — which is the cron expression in vercel.json.
- */
-export const IST_OFFSET_MS = 5.5 * 60 * 60_000;
-export const DAILY_CHECK_HOUR_IST = 9;
-
-/** How long one invocation's claim on a project is respected. */
-export const CLAIM_LEASE_MS = 10 * 60_000;
-
-/**
- * The most recent 09:00 Asia/Kolkata that has already passed.
+ * The floor on how often one project is probed, and the lease on a claim.
  *
- * A project is due when it has not been checked since that instant. This is a
- * guard, not a schedule: the cron fires once a day and does the work, and this
- * is what stops a retried or hand-fired trigger from doing it a second time.
+ * ONE CONSTANT FOR BOTH, because they are the same statement: a claim respected
+ * for N minutes IS a promise not to probe that project again for N minutes. See
+ * claimAccountsToCheck, where a single condition expresses both.
+ *
+ * MUST STAY COMFORTABLY BELOW THE TICK INTERVAL. The trigger is the 5-minute
+ * workflow in .github/workflows/monitor-cron.yml and GitHub's scheduler drifts,
+ * so a tick can arrive slightly early. At exactly 5 minutes an early tick would
+ * land inside the lease, be skipped, and halve the real cadence to 10 minutes.
+ * Four minutes leaves a minute of slack. If that workflow's interval changes,
+ * change this with it.
  */
-export function dailyDueSince(now: number = Date.now()): Date {
-  const ist = now + IST_OFFSET_MS;
-  const d = new Date(ist);
-  const boundary = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), DAILY_CHECK_HOUR_IST);
-  // Before 09:00 IST today, the live boundary is yesterday's.
-  const due = boundary <= ist ? boundary : boundary - 86_400_000;
-  return new Date(due - IST_OFFSET_MS);
-}
-
-/** Milliseconds until the next 09:00 IST — used to align the self-hosted timer. */
-export function msUntilNextDailyCheck(now: number = Date.now()): number {
-  return dailyDueSince(now).getTime() + 86_400_000 - now;
-}
+export const MIN_CHECK_INTERVAL_MS = 4 * 60_000;
 
 /**
  * Turn one OpenAI HTTP response into a status.
@@ -425,10 +415,10 @@ async function handleAlert(acct: OpenAiAccountRow, result: CheckResult): Promise
  * Check one account: decrypt its key, probe, store the outcome, then alert on a
  * transition into or out of NO_CREDIT.
  *
- * FORCED. It does not consult daily_check_enabled, the due-gate or the claim —
- * that flag governs the SCHEDULED run only, so "Check now" keeps working on a
- * project whose daily checking is switched off. Callers that represent the
- * scheduler go through runDailyOpenAiChecks() instead.
+ * FORCED. It does not consult daily_check_enabled or the claim — that flag
+ * governs the SCHEDULED run only, so "Check now" keeps working on a project
+ * whose automatic checking is switched off. Callers that represent the
+ * scheduler go through runOpenAiChecks() instead.
  *
  * The decrypted key exists only inside this function and is never returned,
  * stored or logged. Failures are identified by account name only.
@@ -481,75 +471,82 @@ function checkEach(accounts: OpenAiAccountRow[]): Promise<Array<CheckResult & { 
 }
 
 /**
- * Atomically take ownership of every project that is enabled and due.
+ * Atomically take ownership of every enabled project that has not been claimed
+ * within the last MIN_CHECK_INTERVAL_MS.
  *
- * ONE STATEMENT SELECTS AND CLAIMS, which is the whole point. Reading the due
- * rows and then probing them would be a check-then-act with seconds of daylight
- * in between, and a cron that fires twice — a retry, a hand-run
- * workflow_dispatch, two hosts — would have both invocations see the same
- * project as due, both spend a billable request, and both send the same
- * WhatsApp.
+ * ONE STATEMENT SELECTS AND CLAIMS, which is the whole point. Reading the rows
+ * and then probing them would be a check-then-act with seconds of daylight in
+ * between, and more than one thing calls this endpoint — the 5-minute workflow,
+ * the daily Vercel backstop, a hand-run workflow_dispatch. Two overlapping
+ * invocations would have both see the same project as ready, both spend a
+ * billable request, and both send the same WhatsApp.
  *
  * Why the race cannot happen here: under READ COMMITTED, a second UPDATE
  * reaching a row this one has locked blocks until this one commits, then
  * RE-EVALUATES its WHERE against the updated row. By then check_claimed_at is
- * now(), so the `check_claimed_at < lease cutoff` test fails, the row is not in
- * the second statement's result, and the second caller never sees it. Exactly
- * one invocation gets each project.
+ * now(), so the `check_claimed_at < cutoff` test fails, the row is not in the
+ * second statement's result, and the second caller never sees it. Exactly one
+ * invocation gets each project.
+ *
+ * THAT SAME CONDITION IS ALSO THE SCHEDULE. Because a claim is respected for
+ * MIN_CHECK_INTERVAL_MS, no project can be probed more often than that however
+ * often this endpoint is hit — so the 5-minute tick produces a 5-minute cadence
+ * and nothing here has to know what time it is. This used to carry a second
+ * condition, `last_checked_at < 09:00 IST today`, which made it a once-a-day
+ * check; that gate is gone, and last_checked_at is now display-only.
  *
  * Each statement is its own autocommit transaction, so nothing is held open
- * across the OpenAI HTTP call — which matters with PGPOOL_MAX=3. The lease makes
- * it crash-safe: a run killed mid-flight (the 60s maxDuration cut-off this route
- * has a history of) releases its projects after CLAIM_LEASE_MS instead of
- * leaving them unchecked until tomorrow.
+ * across the OpenAI HTTP call — which matters with PGPOOL_MAX=3. It is also
+ * crash-safe: a run killed mid-flight (the 60s maxDuration cut-off this route
+ * has a history of) releases its projects when the claim expires.
  *
  * `client_id` is NOT NULL with a foreign key, so joining clients cannot drop a
  * row from the claim.
  */
-async function claimDueAccounts(dueSince: Date): Promise<OpenAiAccountRow[]> {
+async function claimAccountsToCheck(): Promise<OpenAiAccountRow[]> {
   return sql<OpenAiAccountRow>(
     `update openai_accounts a
         set check_claimed_at = now()
        from clients c
       where c.id = a.client_id
         and a.daily_check_enabled
-        and (a.last_checked_at  is null or a.last_checked_at  < $1)
-        and (a.check_claimed_at is null or a.check_claimed_at < $2)
+        and (a.check_claimed_at is null or a.check_claimed_at < $1)
     returning ${ACCOUNT_COLS},
               c.name        as client_name,
               c.alert_name  as client_alert_name,
               c.alert_phone as client_alert_phone`,
-    [dueSince.toISOString(), new Date(Date.now() - CLAIM_LEASE_MS).toISOString()]
+    [new Date(Date.now() - MIN_CHECK_INTERVAL_MS).toISOString()]
   );
 }
 
 /**
- * THE scheduled entry point — one run a day, from the single cron entry in
- * vercel.json (03:30 UTC = 09:00 Asia/Kolkata).
+ * THE scheduled entry point, called on every tick of the 5-minute monitoring
+ * cron (.github/workflows/monitor-cron.yml -> GET /api/cron/check-all).
+ *
+ * Safe to call as often as you like: claimAccountsToCheck is what decides
+ * whether a project is actually probed, and it will not hand the same project
+ * out twice inside MIN_CHECK_INTERVAL_MS.
  *
  * Projects with daily_check_enabled = false are excluded in SQL, so a disabled
  * project is never sent to OpenAI and can never produce a scheduled alert.
- * A project that has never been checked counts as due, so a key added during the
- * day is verified promptly rather than sitting unverified until morning.
+ *
+ * CHECK FREQUENCY IS NOT ALERT FREQUENCY. This probes every few minutes; the
+ * per-recipient latch in handleAlert is what keeps a sustained no-credit
+ * episode to one WhatsApp per recipient.
  */
-export async function runDailyOpenAiChecks(): Promise<{
-  checked: number;
-  claimed: number;
-  due_since: string;
-}> {
+export async function runOpenAiChecks(): Promise<{ checked: number; claimed: number }> {
   // A deleted account cannot close its own incident — the claim below only
   // returns rows that still exist.
   await closeOrphanedIncidents();
-  const dueSince = dailyDueSince();
-  const claimed = await claimDueAccounts(dueSince);
+  const claimed = await claimAccountsToCheck();
   const outcomes = await checkEach(claimed);
-  return { checked: outcomes.length, claimed: claimed.length, due_since: dueSince.toISOString() };
+  return { checked: outcomes.length, claimed: claimed.length };
 }
 
 /**
- * Manual "check everything now" from the UI. Forced: it ignores the daily
- * schedule, the due-gate and the claim, because an operator pressing a button is
- * not the scheduler. daily_check_enabled is ignored too — see checkOpenAiAccount.
+ * Manual "check everything now" from the UI. Forced: it ignores the claim and
+ * its interval, because an operator pressing a button is not the scheduler.
+ * daily_check_enabled is ignored too — see checkOpenAiAccount.
  */
 export async function runManualOpenAiChecks(): Promise<{ checked: number }> {
   await closeOrphanedIncidents();

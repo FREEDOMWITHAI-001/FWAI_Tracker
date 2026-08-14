@@ -68,7 +68,7 @@ export async function POST(req: Request) {
     // nothing to check without a key.
     if (!apiKey) return bad('An OpenAI project API key is required.');
 
-    // A project on the daily schedule with nowhere to send its alert is a
+    // A project on the automatic schedule with nowhere to send its alert is a
     // monitor that cannot report, so it is refused at the door — unless the
     // client has a number the alerter can fall back to.
     if (dailyCheck && !phones.length) {
@@ -78,7 +78,7 @@ export async function POST(req: Request) {
       );
       if (!client[0]?.alert_phone) {
         return bad(
-          'Add at least one WhatsApp number, or set an alert number on the client, before turning on daily checking.'
+          'Add at least one WhatsApp number, or set an alert number on the client, before turning on automatic checking.'
         );
       }
     }

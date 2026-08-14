@@ -129,10 +129,11 @@ export default function OpenAiTrackPage() {
         <div>
           <h1>OpenAI Track</h1>
           <p>
-            Whether each client&apos;s OpenAI project can currently make API requests. Projects with daily checking on
-            are checked once a day at <strong>09:00 IST</strong>; each check is one minimal request with that
+            Whether each client&apos;s OpenAI project can currently make API requests. Projects with automatic
+            checking on are checked <strong>every 5 minutes</strong>; each check is one minimal request with that
             project&apos;s own key. If OpenAI reports the quota/credit is exhausted, every WhatsApp number on the
-            project is messaged once through the same AI Sensy setup the downtime alerts use. This does not read a
+            project is messaged <strong>once</strong> through the same AI Sensy setup the downtime alerts use — not
+            on every check, and again only if the project recovers and then runs dry again. This does not read a
             dollar balance — OpenAI exposes none for a project key.
           </p>
         </div>
@@ -215,7 +216,7 @@ export default function OpenAiTrackPage() {
                 <tr>
                   <th>Project</th>
                   <th>Status</th>
-                  <th>Daily check</th>
+                  <th>Auto check</th>
                   <th>Last checked</th>
                   <th>WhatsApp recipients</th>
                   <th></th>
@@ -262,11 +263,11 @@ export default function OpenAiTrackPage() {
                             type="button"
                             className={`switch ${r.daily_check_enabled ? 'on' : ''}`}
                             onClick={() => toggleDaily(r)}
-                            aria-label={`daily checking for ${r.name}`}
+                            aria-label={`automatic checking for ${r.name}`}
                             title={
                               r.daily_check_enabled
-                                ? 'Checked once a day at 09:00 IST. Click to switch off.'
-                                : 'Skipped by the daily run — “Check now” still works. Click to switch on.'
+                                ? 'Checked automatically every 5 minutes. Click to switch off.'
+                                : 'Skipped by the automatic checks — “Check now” still works. Click to switch on.'
                             }
                           >
                             <i />
