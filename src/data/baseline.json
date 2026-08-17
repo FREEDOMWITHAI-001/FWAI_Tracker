@@ -1,0 +1,806 @@
+{
+  "generatedAt": "2026-08-16T19:26:51.353766Z",
+  "cutoffDate": "2026-07-17",
+  "cutoffTs": 1784246400,
+  "accounts": {
+    "1": {
+      "3": {
+        "2026-06-15": {
+          "human": 12,
+          "humanResolved": 12
+        },
+        "2026-06-28": {
+          "human": 5,
+          "humanResolved": 4
+        },
+        "2026-06-02": {
+          "human": 18,
+          "humanResolved": 18
+        },
+        "2026-06-06": {
+          "human": 30,
+          "humanResolved": 29
+        },
+        "2026-06-03": {
+          "human": 17,
+          "humanResolved": 15
+        },
+        "2026-07-11": {
+          "human": 9,
+          "humanResolved": 8
+        },
+        "2026-06-12": {
+          "human": 12,
+          "humanResolved": 10
+        },
+        "2026-05-25": {
+          "human": 22,
+          "humanResolved": 21
+        },
+        "2026-06-11": {
+          "human": 25,
+          "humanResolved": 22
+        },
+        "2026-06-08": {
+          "human": 11,
+          "humanResolved": 11
+        },
+        "2026-06-17": {
+          "human": 27,
+          "humanResolved": 18
+        },
+        "2026-06-20": {
+          "human": 21,
+          "humanResolved": 21
+        },
+        "2026-05-26": {
+          "human": 26,
+          "humanResolved": 26
+        },
+        "2026-05-28": {
+          "human": 14,
+          "humanResolved": 13
+        },
+        "2026-06-14": {
+          "human": 9,
+          "humanResolved": 8
+        },
+        "2026-07-12": {
+          "human": 6,
+          "humanResolved": 5
+        },
+        "2026-06-04": {
+          "human": 13,
+          "humanResolved": 12
+        },
+        "2026-07-02": {
+          "human": 11,
+          "humanResolved": 10
+        },
+        "2026-07-07": {
+          "human": 15,
+          "humanResolved": 15
+        },
+        "2026-05-27": {
+          "human": 12,
+          "humanResolved": 12
+        },
+        "2026-07-03": {
+          "human": 12,
+          "humanResolved": 11
+        },
+        "2026-06-18": {
+          "human": 23,
+          "humanResolved": 20
+        },
+        "2026-06-09": {
+          "human": 15,
+          "humanResolved": 14
+        },
+        "2026-07-10": {
+          "human": 10,
+          "humanResolved": 10
+        },
+        "2026-07-16": {
+          "human": 29,
+          "humanResolved": 29
+        },
+        "2026-06-24": {
+          "human": 23,
+          "humanResolved": 23
+        },
+        "2026-06-16": {
+          "human": 23,
+          "humanResolved": 23
+        },
+        "2026-06-25": {
+          "human": 15,
+          "humanResolved": 15
+        },
+        "2026-05-29": {
+          "human": 10,
+          "humanResolved": 10
+        },
+        "2026-07-08": {
+          "human": 8,
+          "humanResolved": 8
+        },
+        "2026-07-04": {
+          "human": 12,
+          "humanResolved": 12
+        },
+        "2026-07-15": {
+          "human": 14,
+          "humanResolved": 14
+        },
+        "2026-06-29": {
+          "human": 16,
+          "humanResolved": 16
+        },
+        "2026-06-10": {
+          "human": 18,
+          "humanResolved": 18
+        },
+        "2026-05-31": {
+          "human": 10,
+          "humanResolved": 10
+        },
+        "2026-07-14": {
+          "human": 11,
+          "humanResolved": 11
+        },
+        "2026-06-05": {
+          "human": 29,
+          "humanResolved": 27
+        },
+        "2026-07-09": {
+          "human": 11,
+          "humanResolved": 11
+        },
+        "2026-06-07": {
+          "human": 9,
+          "humanResolved": 9
+        },
+        "2026-07-01": {
+          "human": 18,
+          "humanResolved": 18
+        },
+        "2026-07-06": {
+          "human": 11,
+          "humanResolved": 11
+        },
+        "2026-06-21": {
+          "human": 10,
+          "humanResolved": 10
+        },
+        "2026-06-01": {
+          "human": 20,
+          "humanResolved": 20
+        },
+        "2026-06-22": {
+          "human": 20,
+          "humanResolved": 20
+        },
+        "2026-05-30": {
+          "human": 18,
+          "humanResolved": 18
+        },
+        "2026-06-26": {
+          "human": 8,
+          "humanResolved": 8
+        },
+        "2026-06-30": {
+          "human": 11,
+          "humanResolved": 11
+        },
+        "2026-06-19": {
+          "human": 12,
+          "humanResolved": 12
+        },
+        "2026-07-13": {
+          "human": 14,
+          "humanResolved": 14
+        },
+        "2026-06-23": {
+          "human": 14,
+          "humanResolved": 14
+        },
+        "2026-07-17": {
+          "human": 2,
+          "humanResolved": 2
+        },
+        "2026-06-27": {
+          "human": 4,
+          "humanResolved": 4
+        },
+        "2026-07-05": {
+          "human": 4,
+          "humanResolved": 4
+        },
+        "2026-06-13": {
+          "human": 6,
+          "humanResolved": 6
+        },
+        "2026-05-20": {
+          "human": 25,
+          "humanResolved": 25
+        },
+        "2026-05-23": {
+          "human": 38,
+          "humanResolved": 38
+        },
+        "2026-05-24": {
+          "human": 9,
+          "humanResolved": 9
+        },
+        "2026-05-21": {
+          "human": 18,
+          "humanResolved": 18
+        },
+        "2026-05-22": {
+          "human": 12,
+          "humanResolved": 12
+        },
+        "2026-05-19": {
+          "human": 20,
+          "humanResolved": 20
+        },
+        "2026-05-11": {
+          "human": 111,
+          "humanResolved": 111
+        }
+      },
+      "4": {
+        "2026-06-29": {
+          "human": 4,
+          "humanResolved": 4
+        },
+        "2026-05-25": {
+          "human": 3,
+          "humanResolved": 3
+        },
+        "2026-06-08": {
+          "human": 4,
+          "humanResolved": 4
+        },
+        "2026-07-10": {
+          "human": 6,
+          "humanResolved": 3
+        },
+        "2026-06-26": {
+          "human": 7,
+          "humanResolved": 6
+        },
+        "2026-06-25": {
+          "human": 5,
+          "humanResolved": 4
+        },
+        "2026-07-16": {
+          "human": 2,
+          "humanResolved": 2
+        },
+        "2026-06-27": {
+          "human": 3,
+          "humanResolved": 2
+        },
+        "2026-06-18": {
+          "human": 6,
+          "humanResolved": 6
+        },
+        "2026-06-30": {
+          "human": 3,
+          "humanResolved": 2
+        },
+        "2026-05-27": {
+          "human": 4,
+          "humanResolved": 4
+        },
+        "2026-07-02": {
+          "human": 2,
+          "humanResolved": 2
+        },
+        "2026-06-05": {
+          "human": 2,
+          "humanResolved": 2
+        },
+        "2026-06-16": {
+          "human": 34,
+          "humanResolved": 32
+        },
+        "2026-06-10": {
+          "human": 3,
+          "humanResolved": 3
+        },
+        "2026-05-15": {
+          "human": 2,
+          "humanResolved": 2
+        },
+        "2026-06-15": {
+          "human": 3,
+          "humanResolved": 3
+        },
+        "2026-07-08": {
+          "human": 6,
+          "humanResolved": 6
+        },
+        "2026-05-29": {
+          "human": 2,
+          "humanResolved": 2
+        },
+        "2026-06-01": {
+          "human": 4,
+          "humanResolved": 4
+        },
+        "2026-07-07": {
+          "human": 3,
+          "humanResolved": 2
+        },
+        "2026-07-01": {
+          "human": 7,
+          "humanResolved": 6
+        },
+        "2026-05-23": {
+          "human": 1,
+          "humanResolved": 1
+        },
+        "2026-07-12": {
+          "human": 1,
+          "humanResolved": 1
+        },
+        "2026-06-24": {
+          "human": 11,
+          "humanResolved": 10
+        },
+        "2026-07-09": {
+          "human": 3,
+          "humanResolved": 3
+        },
+        "2026-07-05": {
+          "human": 3,
+          "humanResolved": 3
+        },
+        "2026-07-15": {
+          "human": 3,
+          "humanResolved": 3
+        },
+        "2026-07-14": {
+          "human": 4,
+          "humanResolved": 4
+        },
+        "2026-07-11": {
+          "human": 4,
+          "humanResolved": 3
+        },
+        "2026-07-13": {
+          "human": 3,
+          "humanResolved": 3
+        },
+        "2026-07-06": {
+          "human": 4,
+          "humanResolved": 4
+        },
+        "2026-06-17": {
+          "human": 5,
+          "humanResolved": 1
+        },
+        "2026-06-11": {
+          "human": 2,
+          "humanResolved": 2
+        },
+        "2026-05-18": {
+          "human": 2,
+          "humanResolved": 2
+        },
+        "2026-05-22": {
+          "human": 2,
+          "humanResolved": 2
+        },
+        "2026-07-03": {
+          "human": 3,
+          "humanResolved": 3
+        },
+        "2026-05-13": {
+          "human": 6,
+          "humanResolved": 6
+        },
+        "2026-06-03": {
+          "human": 3,
+          "humanResolved": 3
+        },
+        "2026-06-28": {
+          "human": 2,
+          "humanResolved": 2
+        },
+        "2026-06-23": {
+          "human": 3,
+          "humanResolved": 2
+        },
+        "2026-06-21": {
+          "human": 3,
+          "humanResolved": 3
+        },
+        "2026-06-20": {
+          "human": 4,
+          "humanResolved": 2
+        },
+        "2026-05-28": {
+          "human": 1,
+          "humanResolved": 1
+        },
+        "2026-06-13": {
+          "human": 1,
+          "humanResolved": 1
+        },
+        "2026-05-20": {
+          "human": 7,
+          "humanResolved": 7
+        },
+        "2026-06-04": {
+          "human": 1,
+          "humanResolved": 1
+        },
+        "2026-06-06": {
+          "human": 1,
+          "humanResolved": 1
+        },
+        "2026-05-30": {
+          "human": 1,
+          "humanResolved": 1
+        },
+        "2026-05-26": {
+          "human": 2,
+          "humanResolved": 2
+        },
+        "2026-05-16": {
+          "human": 5,
+          "humanResolved": 5
+        },
+        "2026-05-21": {
+          "human": 1,
+          "humanResolved": 1
+        },
+        "2026-05-19": {
+          "human": 1,
+          "humanResolved": 1
+        },
+        "2026-05-12": {
+          "human": 5,
+          "humanResolved": 5
+        },
+        "2026-06-22": {
+          "human": 4,
+          "humanResolved": 3
+        }
+      }
+    },
+    "3": {
+      "12": {
+        "2026-07-02": {
+          "human": 2,
+          "humanResolved": 0
+        },
+        "2026-06-25": {
+          "human": 6,
+          "humanResolved": 0
+        },
+        "2026-07-06": {
+          "human": 7,
+          "humanResolved": 0
+        },
+        "2026-06-29": {
+          "human": 7,
+          "humanResolved": 0
+        },
+        "2026-06-18": {
+          "human": 6,
+          "humanResolved": 0
+        },
+        "2026-06-23": {
+          "human": 6,
+          "humanResolved": 0
+        },
+        "2026-07-01": {
+          "human": 3,
+          "humanResolved": 0
+        },
+        "2026-06-21": {
+          "human": 6,
+          "humanResolved": 0
+        },
+        "2026-06-26": {
+          "human": 12,
+          "humanResolved": 0
+        },
+        "2026-07-10": {
+          "human": 2,
+          "humanResolved": 0
+        },
+        "2026-07-13": {
+          "human": 8,
+          "humanResolved": 0
+        },
+        "2026-07-07": {
+          "human": 7,
+          "humanResolved": 0
+        },
+        "2026-07-08": {
+          "human": 3,
+          "humanResolved": 0
+        },
+        "2026-07-09": {
+          "human": 3,
+          "humanResolved": 0
+        },
+        "2026-07-05": {
+          "human": 2,
+          "humanResolved": 0
+        },
+        "2026-07-16": {
+          "human": 3,
+          "humanResolved": 0
+        },
+        "2026-07-03": {
+          "human": 3,
+          "humanResolved": 0
+        },
+        "2026-07-15": {
+          "human": 3,
+          "humanResolved": 0
+        },
+        "2026-07-14": {
+          "human": 3,
+          "humanResolved": 0
+        },
+        "2026-06-27": {
+          "human": 5,
+          "humanResolved": 0
+        },
+        "2026-06-28": {
+          "human": 4,
+          "humanResolved": 0
+        },
+        "2026-07-04": {
+          "human": 1,
+          "humanResolved": 0
+        },
+        "2026-06-30": {
+          "human": 2,
+          "humanResolved": 0
+        },
+        "2026-06-22": {
+          "human": 5,
+          "humanResolved": 0
+        },
+        "2026-06-24": {
+          "human": 4,
+          "humanResolved": 0
+        },
+        "2026-06-19": {
+          "human": 6,
+          "humanResolved": 0
+        },
+        "2026-06-20": {
+          "human": 2,
+          "humanResolved": 0
+        }
+      },
+      "14": {
+        "2026-07-06": {
+          "human": 2,
+          "humanResolved": 0
+        },
+        "2026-07-16": {
+          "human": 1,
+          "humanResolved": 0
+        },
+        "2026-07-12": {
+          "human": 1,
+          "humanResolved": 0
+        },
+        "2026-07-05": {
+          "human": 1,
+          "humanResolved": 0
+        },
+        "2026-07-02": {
+          "human": 1,
+          "humanResolved": 0
+        },
+        "2026-07-01": {
+          "human": 1,
+          "humanResolved": 0
+        },
+        "2026-06-27": {
+          "human": 1,
+          "humanResolved": 0
+        },
+        "2026-06-24": {
+          "human": 1,
+          "humanResolved": 1
+        },
+        "2026-06-21": {
+          "human": 1,
+          "humanResolved": 0
+        },
+        "2026-06-19": {
+          "human": 2,
+          "humanResolved": 0
+        },
+        "2026-06-18": {
+          "human": 3,
+          "humanResolved": 0
+        }
+      }
+    },
+    "4": {
+      "17": {
+        "2026-06-26": {
+          "human": 1,
+          "humanResolved": 1
+        }
+      },
+      "16": {},
+      "18": {
+        "2026-06-26": {
+          "human": 1,
+          "humanResolved": 0
+        }
+      },
+      "22": {}
+    },
+    "5": {
+      "20": {
+        "2026-07-01": {
+          "human": 1,
+          "humanResolved": 0
+        }
+      },
+      "21": {}
+    },
+    "7": {
+      "24": {
+        "2026-07-15": {
+          "human": 7,
+          "humanResolved": 0
+        },
+        "2026-07-14": {
+          "human": 2,
+          "humanResolved": 0
+        }
+      }
+    },
+    "2": {
+      "7": {
+        "2026-06-13": {
+          "human": 1,
+          "humanResolved": 1
+        },
+        "2026-06-25": {
+          "human": 1,
+          "humanResolved": 1
+        },
+        "2026-06-28": {
+          "human": 1,
+          "humanResolved": 1
+        },
+        "2026-06-03": {
+          "human": 1,
+          "humanResolved": 1
+        }
+      },
+      "6": {
+        "2026-07-04": {
+          "human": 6,
+          "humanResolved": 1
+        },
+        "2026-07-13": {
+          "human": 2,
+          "humanResolved": 0
+        },
+        "2026-06-03": {
+          "human": 3,
+          "humanResolved": 0
+        },
+        "2026-06-04": {
+          "human": 3,
+          "humanResolved": 0
+        },
+        "2026-06-20": {
+          "human": 9,
+          "humanResolved": 0
+        },
+        "2026-06-22": {
+          "human": 25,
+          "humanResolved": 0
+        },
+        "2026-06-23": {
+          "human": 2,
+          "humanResolved": 0
+        },
+        "2026-06-24": {
+          "human": 1,
+          "humanResolved": 0
+        },
+        "2026-06-25": {
+          "human": 3,
+          "humanResolved": 0
+        },
+        "2026-06-26": {
+          "human": 3,
+          "humanResolved": 0
+        },
+        "2026-06-27": {
+          "human": 2,
+          "humanResolved": 0
+        },
+        "2026-06-28": {
+          "human": 8,
+          "humanResolved": 0
+        },
+        "2026-06-29": {
+          "human": 2,
+          "humanResolved": 0
+        },
+        "2026-06-30": {
+          "human": 1,
+          "humanResolved": 0
+        },
+        "2026-07-01": {
+          "human": 3,
+          "humanResolved": 0
+        },
+        "2026-07-02": {
+          "human": 1,
+          "humanResolved": 0
+        },
+        "2026-07-03": {
+          "human": 4,
+          "humanResolved": 0
+        },
+        "2026-07-05": {
+          "human": 4,
+          "humanResolved": 0
+        },
+        "2026-07-06": {
+          "human": 4,
+          "humanResolved": 0
+        },
+        "2026-07-07": {
+          "human": 2,
+          "humanResolved": 0
+        },
+        "2026-07-08": {
+          "human": 2,
+          "humanResolved": 0
+        },
+        "2026-07-09": {
+          "human": 1,
+          "humanResolved": 0
+        },
+        "2026-07-10": {
+          "human": 1,
+          "humanResolved": 0
+        },
+        "2026-07-11": {
+          "human": 1,
+          "humanResolved": 0
+        },
+        "2026-07-12": {
+          "human": 2,
+          "humanResolved": 0
+        },
+        "2026-07-14": {
+          "human": 1,
+          "humanResolved": 0
+        },
+        "2026-07-15": {
+          "human": 1,
+          "humanResolved": 0
+        },
+        "2026-07-16": {
+          "human": 1,
+          "humanResolved": 0
+        }
+      }
+    }
+  }
+}

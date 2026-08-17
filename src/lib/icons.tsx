@@ -153,3 +153,9 @@ export const IconWhatsApp = (p: P) => (
     <path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.6 4.7-1.2A10 10 0 1 0 12 2z" />
   </svg>
 );
+export const IconChatbot = (p: P) => (
+  <S {...p}>
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    <path d="M9 10h.01M12 10h.01M15 10h.01" strokeLinecap="round" />
+  </S>
+);

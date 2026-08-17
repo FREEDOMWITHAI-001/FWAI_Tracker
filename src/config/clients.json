@@ -1,0 +1,85 @@
+[
+  {
+    "id": "eph",
+    "name": "Easy Parenting Hub",
+    "subtitle": "AI Chatbot Impact & Hours Saved",
+    "accountId": 1,
+    "inboxId": 3,
+    "avgHandlingTimeMinutes": 5,
+    "escalationLabels": ["bot-handoff", "needs-human"],
+    "botAgentId": 4,
+    "channels": [
+      { "name": "Emails CRM", "icon": "✉️", "inboxId": 3 },
+      { "name": "WhatsApp CRM", "icon": "💬", "inboxId": 4 }
+    ]
+  },
+  {
+    "id": "energy-queens",
+    "name": "Energy Queens Hub",
+    "subtitle": "AI Chatbot Impact & Hours Saved",
+    "accountId": 3,
+    "inboxId": 12,
+    "avgHandlingTimeMinutes": 5,
+    "escalationLabels": ["bot-handoff"],
+    "botAgentId": 24,
+    "channels": [
+      { "name": "EQH Email", "icon": "✉️", "inboxId": 12 },
+      { "name": "Web Widget", "icon": "🌐", "inboxId": 14 }
+    ]
+  },
+  {
+    "id": "gonature",
+    "name": "GoNature",
+    "subtitle": "AI Chatbot Impact & Hours Saved",
+    "accountId": 4,
+    "inboxId": 17,
+    "avgHandlingTimeMinutes": 5,
+    "escalationLabels": ["bot-handoff"],
+    "botAgentId": 29,
+    "channels": [
+      { "name": "Web Widget", "icon": "🌐", "inboxId": 17 },
+      { "name": "Support Email", "icon": "✉️", "inboxId": 16 },
+      { "name": "GHL Live Chat", "icon": "💬", "inboxId": 18 },
+      { "name": "WhatsApp", "icon": "📱", "inboxId": 22 }
+    ]
+  },
+  {
+    "id": "dva",
+    "name": "Dipti Vartak Academy",
+    "subtitle": "AI Chatbot Impact & Hours Saved",
+    "accountId": 5,
+    "inboxId": 20,
+    "avgHandlingTimeMinutes": 7,
+    "escalationLabels": ["bot-handoff"],
+    "botAgentId": 34,
+    "channels": [
+      { "name": "WhatsApp CRM", "icon": "💬", "inboxId": 20 },
+      { "name": "Email CRM", "icon": "✉️", "inboxId": 21 }
+    ]
+  },
+  {
+    "id": "fwai",
+    "name": "Fwai",
+    "subtitle": "AI Chatbot Impact & Hours Saved",
+    "accountId": 7,
+    "inboxId": 24,
+    "avgHandlingTimeMinutes": 5,
+    "escalationLabels": ["bot-handoff"],
+    "botAgentId": 41
+  },
+  {
+    "id": "flute",
+    "name": "Flute Gandharvas",
+    "subtitle": "AI Chatbot Impact & Hours Saved",
+    "accountId": 2,
+    "inboxId": 7,
+    "avgHandlingTimeMinutes": 5,
+    "escalationLabels": ["bot-handoff", "needs-human"],
+    "botAgentId": 17,
+    "channels": [
+      { "name": "WhatsApp", "icon": "💬", "inboxId": 7 },
+      { "name": "Email CRM", "icon": "✉️", "inboxId": 6 }
+    ],
+    "timezone": "Asia/Kolkata"
+  }
+]

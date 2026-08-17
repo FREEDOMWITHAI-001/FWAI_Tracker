@@ -18,6 +18,7 @@ import {
   IconSearch,
   IconRefresh,
   IconMenu,
+  IconChatbot,
 } from '@/lib/icons';
 
 const NAV = [
@@ -28,6 +29,7 @@ const NAV = [
   { href: '/calling-reports', label: 'Calling Reports', icon: IconCalling },
   { href: '/openai', label: 'OpenAI Track', icon: IconOpenAI },
   { href: '/alerts', label: 'Alerts', icon: IconBell, badge: true },
+  { href: '/chatbot-report', label: 'Chatbot Report', icon: IconChatbot },
   { href: '/reports', label: 'Reports', icon: IconReports },
   { href: '/settings', label: 'Settings', icon: IconSettings },
 ];
