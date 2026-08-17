@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
 export function ok(data: unknown, init?: number) {
@@ -6,6 +7,49 @@ export function ok(data: unknown, init?: number) {
 
 export function bad(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
+}
+
+/**
+ * Constant-time string comparison, so a caller cannot recover the secret by
+ * measuring how long a wrong guess takes to be rejected. Length is compared
+ * first because timingSafeEqual throws on a length mismatch; that leaks only the
+ * length, which is not the secret.
+ */
+function secretMatches(provided: string, expected: string): boolean {
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * Authenticate a scheduled caller. Returns a response to send back when the
+ * request must be refused, or null when the handler may proceed.
+ *
+ * SHARED BY EVERY /api/cron/* ROUTE, deliberately. There are two of them now —
+ * the 5-minute VM/app tick and the OpenAI credit check — and both probe
+ * infrastructure, send WhatsApp messages or spend OpenAI quota. Copying this
+ * guard into each one is how the two drift until only one of them is safe.
+ *
+ * FAILS CLOSED in production. This logic once read `if (secret) { ...check... }`,
+ * so forgetting to set CRON_SECRET did not merely weaken the endpoint — it
+ * removed the check entirely and left the route open to anonymous callers. An
+ * unset secret is now a 503 rather than an open door. Development is exempt so
+ * `npm run dev` and local curl testing keep working without ceremony.
+ */
+export function requireCronSecret(req: Request, label: string): NextResponse | null {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error(`[${label}] refused: CRON_SECRET is not set in this environment`);
+      return bad('This endpoint requires CRON_SECRET to be configured on the server.', 503);
+    }
+    console.warn(`[${label}] CRON_SECRET is not set — running unauthenticated (development only)`);
+    return null;
+  }
+  const auth = req.headers.get('authorization') || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!token || !secretMatches(token, secret)) return bad('Unauthorized', 401);
+  return null;
 }
 
 /**

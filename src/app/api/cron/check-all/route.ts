@@ -1,58 +1,32 @@
-import { timingSafeEqual } from 'node:crypto';
 import { sql } from '@/lib/db';
-import { ok, bad, guard } from '@/lib/api';
+import { ok, guard, requireCronSecret } from '@/lib/api';
 import { checkVm, checkApp } from '@/lib/checks';
 import { runAlerts } from '@/lib/alerts';
-import { runOpenAiChecks } from '@/lib/openai-check';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60; // up to 60s on Vercel — plenty for a fleet of a few VMs
 
-/**
- * Constant-time string comparison, so a caller cannot recover the secret by
- * measuring how long a wrong guess takes to be rejected. Length is compared
- * first because timingSafeEqual throws on a length mismatch; that leaks only the
- * length, which is not the secret.
- */
-function secretMatches(provided: string, expected: string): boolean {
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 // GET /api/cron/check-all
-// The monitoring tick. Called every 5 minutes by
+// The VM and app monitoring tick. Called every 5 minutes by
 // .github/workflows/monitor-cron.yml — Vercel's Hobby plan allows only one cron
 // run per day, so the cron entry in vercel.json is a daily backstop, not the
-// trigger. Evaluates alerts, checks every OpenAI project that is due, then
-// probes every VM and app that has a check configured. Returns a summary, which
-// the workflow prints, so a run is diagnosable from the Actions log alone.
+// trigger. Evaluates alerts, then probes every VM and app that has a check
+// configured. Returns a summary, which the workflow prints, so a run is
+// diagnosable from the Actions log alone.
 //
-// Protected by the CRON_SECRET env var. The workflow sends
-// "Authorization: Bearer <CRON_SECRET>"; Vercel Cron attaches the same header
-// automatically once the variable is set on the project.
+// DOES NO OPENAI WORK, DELIBERATELY. The OpenAI credit check lives at
+// /api/cron/openai and runs four times a day from cron-job.org, because each
+// check is a real billable request and this route fires 288 times a day. The two
+// were briefly merged and that is exactly what it cost. Do not add it back here:
+// scripts/test-openai-check.mjs asserts this route sends nothing to OpenAI.
 //
-// FAILS CLOSED in production. This previously read `if (secret) { ...check... }`,
-// so forgetting to set CRON_SECRET did not merely weaken the endpoint — it
-// removed the check entirely and left a route that probes the whole fleet, sends
-// WhatsApp messages and spends OpenAI API quota open to anonymous callers, while
-// the comment above it claimed it "can't be abused". An unset secret is now a
-// 503 in production rather than an open door. Development is exempt so `npm run
-// dev` and local curl testing keep working without ceremony.
+// Protected by the CRON_SECRET env var, via the shared guard in src/lib/api.ts.
+// The workflow sends "Authorization: Bearer <CRON_SECRET>"; Vercel Cron attaches
+// the same header automatically once the variable is set on the project.
 export async function GET(req: Request) {
   return guard(async () => {
-    const secret = process.env.CRON_SECRET;
-    if (!secret) {
-      if (process.env.NODE_ENV === 'production') {
-        console.error('[cron] refused: CRON_SECRET is not set in this environment');
-        return bad('This endpoint requires CRON_SECRET to be configured on the server.', 503);
-      }
-      console.warn('[cron] CRON_SECRET is not set — running unauthenticated (development only)');
-    } else {
-      const auth = req.headers.get('authorization') || '';
-      const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-      if (!token || !secretMatches(token, secret)) return bad('Unauthorized', 401);
-    }
+    const refused = requireCronSecret(req, 'cron');
+    if (refused) return refused;
     const started = Date.now();
 
     // ---- alerts FIRST, deliberately ---------------------------------------
@@ -73,40 +47,6 @@ export async function GET(req: Request) {
     } catch (e: any) {
       alertsOk = false;
       console.error('[cron] runAlerts failed', e?.message);
-    }
-
-    // ---- OpenAI checks, also BEFORE the probes ------------------------------
-    // Same starvation reason as runAlerts above: this used to run last, after
-    // every probe, so a single unreachable SSH host (30s + retry) exhausted
-    // maxDuration and the function was killed before any no-credit WhatsApp
-    // could be sent — silently, because a killed function reports no error.
-    //
-    // RUNS ON EVERY TICK, i.e. every 5 minutes, so a project that runs out of
-    // credit is noticed within minutes rather than at some point the next day.
-    //
-    // This used to be gated behind "is the caller Vercel Cron?" (a ?openai=daily
-    // flag plus the x-vercel-cron-schedule header and vercel-cron user agent),
-    // so that only the once-a-day cron in vercel.json triggered it. That gate is
-    // gone, and with it the reason the 09:00 check silently never ran: Hobby
-    // cron precision is ±59 minutes, so the trigger regularly landed before the
-    // 09:00 IST boundary its own due-gate was measured against, claimed nothing,
-    // and reported success.
-    //
-    // TICKING THIS OFTEN DOES NOT MEAN PROBING OPENAI THIS OFTEN. runOpenAiChecks
-    // claims each project for MIN_CHECK_INTERVAL_MS in the same UPDATE that
-    // selects it, so the probe rate is bounded in SQL no matter who calls here
-    // or how often. And the WhatsApp rate is bounded separately again, by the
-    // per-recipient latch in handleAlert. See src/lib/openai-check.ts.
-    let openaiChecked = 0;
-    let openaiClaimed = 0;
-    let openaiOk = true;
-    try {
-      const r = await runOpenAiChecks();
-      openaiChecked = r.checked;
-      openaiClaimed = r.claimed;
-    } catch (e: any) {
-      openaiOk = false;
-      console.error('[cron] openai check failed', e?.message);
     }
 
     // VMs: anything with SSH, a port, or a Health URL set.
@@ -153,12 +93,6 @@ export async function GET(req: Request) {
       vms_checked: vmsChecked,
       vms_total: vms.length,
       apps_checked: appsChecked,
-      // `openai_checked: 0` is the normal state for a tick that arrives inside
-      // MIN_CHECK_INTERVAL_MS of the last one — it means nothing was due, not
-      // that anything failed. `openai_ok` is the field that reports failure.
-      openai_checked: openaiChecked,
-      openai_claimed: openaiClaimed,
-      openai_ok: openaiOk,
       ms: Date.now() - started,
     });
   });

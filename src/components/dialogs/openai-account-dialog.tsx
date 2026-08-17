@@ -181,7 +181,7 @@ export function OpenAiAccountDialog({
 
       <Field
         label="Automatic checking"
-        hint="When on, this project is checked automatically every 5 minutes. When off, it is skipped by the automatic checks — you can still check it by hand with “Check now”."
+        hint="When on, this project is checked automatically at 10:00, 13:00, 18:00 and 22:00 IST. When off, it is skipped by the automatic checks — you can still check it by hand with “Check now”."
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button
