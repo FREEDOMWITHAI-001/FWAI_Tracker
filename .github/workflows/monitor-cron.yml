@@ -1,17 +1,17 @@
 # Five-minute monitoring trigger.
 #
-# Vercel's Hobby plan caps crons at one run per day, so the entry in vercel.json
-# exists only as a daily backstop. The in-process scheduler in
+# Vercel's Hobby plan caps crons at one run per day, so vercel.json is pinned to
+# a single daily entry and exists only as a backstop. The in-process scheduler in
 # src/lib/scheduler.ts cannot cover the gap either — setInterval does not survive
 # a serverless invocation. This workflow is therefore the real automation in
 # production: it calls the same endpoint Vercel Cron would call, with the same
 # bearer secret, on the cadence the dashboard was designed around.
 #
-# It drives EVERYTHING on that cadence: VM and app probes, alert evaluation, and
-# the OpenAI project credit checks. The endpoint decides what is actually due —
-# in particular an OpenAI project is claimed for four minutes when it is probed,
-# so ticking here every five minutes yields one probe per project per tick and
-# no more, however often this runs.
+# SCOPE: VM and app probes plus alert evaluation. It does NOT check the OpenAI
+# projects — each of those is a billable OpenAI request, so they run four times a
+# day from an external cron-job.org job hitting /api/cron/openai instead. The two
+# were briefly merged onto this schedule, which cost 288 probes per project per
+# day; do not add ?openai= or a second URL to the curl below.
 #
 # CAVEAT: GitHub's scheduler is best-effort. Runs are queued, can arrive several
 # minutes late under load, and may be skipped entirely during peak periods.

@@ -151,9 +151,9 @@ export interface OpenAiAccount {
    */
   effective_phones?: string[];
   /**
-   * Whether the automatic 5-minute check includes this project. Named for the
-   * once-a-day schedule it originally gated; renaming the column would need a
-   * migration for no functional gain.
+   * Whether the scheduled check (four times a day) includes this project. Named
+   * for the once-a-day schedule it originally gated; renaming the column would
+   * need a migration for no functional gain.
    */
   daily_check_enabled: boolean;
   /** Null until the first check runs. */

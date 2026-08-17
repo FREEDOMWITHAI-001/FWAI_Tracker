@@ -137,11 +137,11 @@ async function resetEpisode(db, id) {
 }
 
 /**
- * Make a project eligible for the next tick: enabled and unclaimed.
+ * Make a project eligible for the next scheduled run: enabled and unclaimed.
  *
- * Clearing the claim is the whole of it. There is no due-date to reset —
- * last_checked_at stopped gating anything when the once-a-day schedule was
- * replaced by the 5-minute tick.
+ * Clearing the claim is the whole of it, and it is also how the test simulates
+ * the passage of time between two of the four daily runs. There is no due-date
+ * to reset — last_checked_at gates nothing.
  */
 async function makeReady(db, id) {
   await db.query(
@@ -151,12 +151,18 @@ async function makeReady(db, id) {
 }
 
 /**
- * One tick of the monitoring cron — byte-for-byte the request
- * .github/workflows/monitor-cron.yml makes: bare path, bearer token, nothing
- * else. If this stops triggering the OpenAI checks, production has stopped too.
+ * One tick of the 5-minute VM monitoring cron — byte-for-byte the request
+ * .github/workflows/monitor-cron.yml makes. It must do NO OpenAI work.
  */
-const tick = () =>
+const vmTick = () =>
   req('GET', '/api/cron/check-all', undefined, { authorization: `Bearer ${CRON_SECRET}` });
+
+/**
+ * One scheduled OpenAI run — byte-for-byte the request the cron-job.org job
+ * makes four times a day (10:00, 13:00, 18:00, 22:00 Asia/Kolkata).
+ */
+const openaiRun = () =>
+  req('GET', '/api/cron/openai', undefined, { authorization: `Bearer ${CRON_SECRET}` });
 
 const row1 = async (db, sql, params) => (await db.query(sql, params)).rows[0];
 const rows = async (db, sql, params) => (await db.query(sql, params)).rows;
@@ -582,18 +588,28 @@ async function main() {
     });
 
     // ---- unrelated functionality --------------------------------------------
-    await check('the cron endpoint still rejects an unauthenticated caller', async () => {
+    // Both scheduled endpoints go through the same guard (requireCronSecret in
+    // src/lib/api.ts), so both are checked — a route that forgot to call it
+    // would be an open door onto billable work.
+    await check('the VM cron endpoint rejects an unauthenticated caller', async () => {
       const r = await req('GET', '/api/cron/check-all');
       assert.equal(r.status, 401, `expected 401, got ${r.status}: ${r.text.slice(0, 200)}`);
     });
 
-    await check('the shared cron endpoint still runs VM/app checks and the OpenAI pass', async () => {
-      const r = await req('GET', '/api/cron/check-all', undefined, {
-        authorization: `Bearer ${CRON_SECRET}`,
-      });
+    await check('the OpenAI cron endpoint rejects an unauthenticated caller', async () => {
+      const r = await req('GET', '/api/cron/openai');
+      assert.equal(r.status, 401, `expected 401, got ${r.status}: ${r.text.slice(0, 200)}`);
+    });
+
+    await check('the OpenAI cron endpoint rejects a wrong secret', async () => {
+      const r = await req('GET', '/api/cron/openai', undefined, { authorization: 'Bearer wrong-secret' });
+      assert.equal(r.status, 401, `expected 401, got ${r.status}: ${r.text.slice(0, 200)}`);
+    });
+
+    await check('the VM cron endpoint still runs VM/app checks', async () => {
+      const r = await vmTick();
       assert.equal(r.status, 200, `HTTP ${r.status}: ${r.text}`);
       assert.equal(r.json.alerts_evaluated, true, 'VM/app alert evaluation did not run');
-      assert.equal(r.json.openai_ok, true, `openai pass failed: ${r.text}`);
       assert.ok('vms_checked' in r.json && 'apps_checked' in r.json, 'VM/app probing disappeared');
     });
 
@@ -761,46 +777,50 @@ async function main() {
       assert.equal(still.length, 3, `re-running the migration disturbed the recipients: ${still.length}`);
     });
 
-    // ---- the 5-minute tick --------------------------------------------------
-    await check('a tick checks an enabled, unclaimed project', async () => {
+    // ---- the scheduled OpenAI run -------------------------------------------
+    await check('a scheduled run checks an enabled, unclaimed project', async () => {
       await resetEpisode(db, id);
       await makeReady(db, id);
       nextOpenAi = { status: 200, body: { choices: [] } };
-      const r = await tick();
+      const r = await openaiRun();
       assert.ok(r.json.openai_claimed >= 1, `nothing was claimed: ${r.text}`);
       const row = await row1(db, 'select status, last_checked_at from openai_accounts where id = $1', [id]);
       assert.equal(row.status, 'CREDIT_AVAILABLE');
-      assert.ok(row.last_checked_at, 'last_checked_at was not stamped by the tick');
+      assert.ok(row.last_checked_at, 'last_checked_at was not stamped by the scheduled run');
     });
 
-    await check('a second tick inside the check interval does not re-probe', async () => {
+    // THE SPEND CAP. Whoever holds the cron-job.org account can change the
+    // schedule without touching this repository, so the ceiling on billable
+    // requests has to live in the code. A second call moments later must cost
+    // nothing at all.
+    await check('a second run inside the check interval does not re-probe', async () => {
       const before = openAiHits;
-      await tick();
-      assert.equal(openAiHits, before, 'a tick moments after the last one re-probed OpenAI');
+      await openaiRun();
+      assert.equal(openAiHits, before, 'a run moments after the last one re-probed OpenAI');
     });
 
-    // The cadence itself. The tick fires every 5 minutes and the claim is held
-    // for 4, so the following tick must find the project ready again — if the
-    // lease is ever raised to 5 minutes or beyond, an early tick starts being
-    // swallowed and the real cadence silently halves.
-    await check('the next tick, once the claim has aged, probes again', async () => {
+    // The real cadence: the four daily runs are at least 3 hours apart
+    // (10:00 -> 13:00), against a 60-minute claim. Aging the claim by 3 hours is
+    // exactly that gap, so this fails if MIN_CHECK_INTERVAL_MS is ever raised
+    // past the schedule and starts swallowing the 13:00 run.
+    await check('the next scheduled run, 3 hours later, probes again', async () => {
       await db.query(
-        "update openai_accounts set check_claimed_at = now() - interval '5 minutes' where id = $1",
+        "update openai_accounts set check_claimed_at = now() - interval '3 hours' where id = $1",
         [id]
       );
       const before = openAiHits;
       nextOpenAi = { status: 200, body: { choices: [] } };
-      await tick();
-      assert.equal(openAiHits, before + 1, 'the project was not re-probed 5 minutes later');
+      await openaiRun();
+      assert.equal(openAiHits, before + 1, 'the project was not re-probed at the next scheduled time');
     });
 
-    await check('a disabled project is skipped by the tick and never sent to OpenAI', async () => {
+    await check('a disabled project is skipped by the scheduled run and never sent to OpenAI', async () => {
       await makeReady(db, id);
       await req('PATCH', `/api/openai-accounts/${id}`, { daily_check_enabled: false });
       sent.length = 0;
       const before = openAiHits;
       nextOpenAi = quota; // would alert loudly if it were checked
-      const r = await tick();
+      const r = await openaiRun();
       assert.equal(openAiHits, before, 'a disabled project was sent to OpenAI by the scheduled run');
       assert.equal(r.json.openai_claimed, 0, 'a disabled project was claimed');
       assert.equal(sent.length, 0, 'a disabled project produced a scheduled WhatsApp');
@@ -841,10 +861,11 @@ async function main() {
 
     // Vercel's Hobby plan rejects any cron expression that would run more than
     // once a day — that is what forced the 5-minute cadence onto GitHub Actions
-    // in the first place. This entry is only a backstop for the days Actions is
-    // disabled or down, so what matters is that it stays deployable, not when it
-    // lands: the app no longer cares what time of day it is called.
-    await check('vercel.json declares one Hobby-legal daily cron on the bare path', async () => {
+    // in the first place. This entry is only a VM/app backstop for the days
+    // Actions is disabled or down, so what matters is that it stays deployable,
+    // not when it lands. It must NOT point at the OpenAI endpoint: that would
+    // add a fifth, unpredictably-timed billable run to the four scheduled ones.
+    await check('vercel.json declares one Hobby-legal daily cron on the VM path', async () => {
       const cfg = JSON.parse(await readFile('vercel.json', 'utf8'));
       assert.equal(cfg.crons.length, 1, `expected 1 cron entry, found ${cfg.crons.length}`);
       const [entry] = cfg.crons;
@@ -857,40 +878,73 @@ async function main() {
       assert.match(hour, /^\d+$/, `Hobby rejects a non-fixed hour: "${entry.schedule}"`);
     });
 
-    await check('the 5-minute Actions workflow is what triggers the OpenAI checks', async () => {
+    // THE ISOLATION GUARD, and the most important test in this file.
+    //
+    // The 5-minute workflow fires 288 times a day. If the OpenAI check is ever
+    // reattached to it — by a query flag, a second curl, or a call added back to
+    // the route — that is 288 billable requests per project per day. It has
+    // happened once already. This fails the moment it happens again.
+    await check('the 5-minute Actions workflow performs no OpenAI work', async () => {
       const wf = await readFile('.github/workflows/monitor-cron.yml', 'utf8');
-      assert.match(wf, /\*\/5 \* \* \* \*/, 'the monitoring workflow is no longer on a 5-minute schedule');
-      assert.match(
-        wf,
-        /\/api\/cron\/check-all"/,
-        'the workflow no longer calls the bare check-all path the route expects'
+
+      // Comments are stripped before the URL assertions: the header explains at
+      // length why the OpenAI endpoint is NOT called here, and a naive substring
+      // search would read that explanation as the thing it warns against. What
+      // matters is what the workflow executes.
+      const code = wf
+        .split('\n')
+        .filter((l) => !/^\s*#/.test(l))
+        .join('\n');
+
+      assert.match(code, /\*\/5 \* \* \* \*/, 'the monitoring workflow is no longer on a 5-minute schedule');
+      assert.match(code, /\/api\/cron\/check-all"/, 'the workflow no longer calls the check-all path');
+      assert.ok(
+        !code.includes('/api/cron/openai'),
+        'the 5-minute workflow now calls the OpenAI endpoint — that is 288 billable requests a day'
       );
 
-      // The request below is byte-for-byte what that workflow sends.
+      // The request below is byte-for-byte what that workflow sends, against a
+      // project that is enabled, unclaimed and would otherwise be probed.
       await resetEpisode(db, id);
       await makeReady(db, id);
       const before = openAiHits;
-      nextOpenAi = { status: 200, body: { choices: [] } };
-      const r = await tick();
+      nextOpenAi = quota; // would alert loudly if it were checked
+      sent.length = 0;
+      const r = await vmTick();
       assert.equal(r.status, 200, r.text);
-      assert.equal(openAiHits, before + 1, 'the 5-minute tick did not probe OpenAI');
+      assert.equal(openAiHits, before, 'the 5-minute VM tick sent a request to OpenAI');
+      assert.equal(sent.length, 0, 'the 5-minute VM tick produced a WhatsApp');
+      assert.ok(!('openai_checked' in r.json), 'the VM tick still reports OpenAI work');
       assert.ok('vms_checked' in r.json, 'the tick stopped doing its VM work');
     });
 
+    await check('the OpenAI endpoint does no VM work', async () => {
+      await makeReady(db, id);
+      nextOpenAi = { status: 200, body: { choices: [] } };
+      const r = await openaiRun();
+      assert.equal(r.status, 200, r.text);
+      assert.ok('openai_checked' in r.json, 'the OpenAI endpoint reported no OpenAI work');
+      assert.ok(
+        !('vms_checked' in r.json) && !('apps_checked' in r.json),
+        'the OpenAI endpoint is probing VMs — it must stay independent of the monitoring tick'
+      );
+    });
+
     // ---- check frequency is not alert frequency -----------------------------
-    // The requirement in one test: probe every tick, message once per episode.
-    await check('three consecutive no-credit ticks send exactly one round of WhatsApps', async () => {
+    // The requirement in one test: probe on all four daily runs, message once
+    // per episode. Three consecutive runs stand in for 10:00, 13:00 and 18:00.
+    await check('three consecutive no-credit runs send exactly one round of WhatsApps', async () => {
       await resetEpisode(db, id);
       sent.length = 0;
       const before = openAiHits;
 
       for (let i = 0; i < 3; i++) {
-        await makeReady(db, id); // pretend 5 minutes passed
+        await makeReady(db, id); // stand in for the hours between scheduled runs
         nextOpenAi = quota;
-        await tick();
+        await openaiRun();
       }
 
-      assert.equal(openAiHits - before, 3, 'the project was not probed on every tick');
+      assert.equal(openAiHits - before, 3, 'the project was not probed on every scheduled run');
       assert.equal(
         sent.length,
         3,
@@ -904,7 +958,7 @@ async function main() {
 
       await makeReady(db, id);
       nextOpenAi = { status: 200, body: { choices: [] } }; // recovered
-      await tick();
+      await openaiRun();
       assert.equal(sent.length, 0, 'recovery sent a message; it must be silent');
       const cleared = await rows(
         db,
@@ -918,12 +972,14 @@ async function main() {
 
       await makeReady(db, id);
       nextOpenAi = quota; // out of credit again
-      await tick();
+      await openaiRun();
       assert.equal(sent.length, 3, `a relapse must message the whole list again, got ${sent.length}`);
     });
 
     // ---- concurrency --------------------------------------------------------
-    await check('two simultaneous ticks check the project only once', async () => {
+    // cron-job.org retries a request it believes timed out, so two overlapping
+    // runs are a real scenario, not a hypothetical.
+    await check('two simultaneous runs check the project only once', async () => {
       await resetEpisode(db, id);
       await makeReady(db, id);
       sent.length = 0;
@@ -931,7 +987,7 @@ async function main() {
       openAiDelayMs = 400; // hold the first probe open so the runs really overlap
 
       const before = openAiHits;
-      const [a, b] = await Promise.all([tick(), tick()]);
+      const [a, b] = await Promise.all([openaiRun(), openaiRun()]);
       openAiDelayMs = 0;
 
       assert.equal(
@@ -953,12 +1009,12 @@ async function main() {
       // Simulate an invocation that claimed the project and then died: the claim
       // is present but older than MIN_CHECK_INTERVAL_MS.
       await db.query(
-        "update openai_accounts set check_claimed_at = now() - interval '11 minutes' where id = $1",
+        "update openai_accounts set check_claimed_at = now() - interval '2 hours' where id = $1",
         [id]
       );
       const before = openAiHits;
       nextOpenAi = { status: 200, body: { choices: [] } };
-      await tick();
+      await openaiRun();
       assert.equal(openAiHits, before + 1, 'a project whose claim had expired was never retried');
     });
 
@@ -966,7 +1022,7 @@ async function main() {
       await makeReady(db, id);
       await db.query('update openai_accounts set check_claimed_at = now() where id = $1', [id]);
       const before = openAiHits;
-      await tick();
+      await openaiRun();
       assert.equal(openAiHits, before, 'a project claimed seconds ago was checked by another run');
     });
 

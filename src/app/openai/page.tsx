@@ -130,11 +130,11 @@ export default function OpenAiTrackPage() {
           <h1>OpenAI Track</h1>
           <p>
             Whether each client&apos;s OpenAI project can currently make API requests. Projects with automatic
-            checking on are checked <strong>every 5 minutes</strong>; each check is one minimal request with that
-            project&apos;s own key. If OpenAI reports the quota/credit is exhausted, every WhatsApp number on the
-            project is messaged <strong>once</strong> through the same AI Sensy setup the downtime alerts use — not
-            on every check, and again only if the project recovers and then runs dry again. This does not read a
-            dollar balance — OpenAI exposes none for a project key.
+            checking on are checked four times a day, at <strong>10:00, 13:00, 18:00 and 22:00 IST</strong>; each
+            check is one minimal request with that project&apos;s own key. If OpenAI reports the quota/credit is
+            exhausted, every WhatsApp number on the project is messaged <strong>once</strong> through the same AI
+            Sensy setup the downtime alerts use — not on every check, and again only if the project recovers and
+            then runs dry again. This does not read a dollar balance — OpenAI exposes none for a project key.
           </p>
         </div>
         <div className="actions">
@@ -266,7 +266,7 @@ export default function OpenAiTrackPage() {
                             aria-label={`automatic checking for ${r.name}`}
                             title={
                               r.daily_check_enabled
-                                ? 'Checked automatically every 5 minutes. Click to switch off.'
+                                ? 'Checked automatically at 10:00, 13:00, 18:00 and 22:00 IST. Click to switch off.'
                                 : 'Skipped by the automatic checks — “Check now” still works. Click to switch on.'
                             }
                           >

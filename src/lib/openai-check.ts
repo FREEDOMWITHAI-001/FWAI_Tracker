@@ -16,16 +16,19 @@
 // table under source_kind 'openai', and a project with no recipients of its own
 // falls back to its client's number exactly as the VM alerter does.
 //
-// WHEN IT RUNS: every 5 minutes, on the same monitoring cron that checks the
-// VMs — .github/workflows/monitor-cron.yml -> GET /api/cron/check-all. There is
-// no separate schedule and no timer; `claimAccountsToCheck` below both hands out
-// the work and bounds how often any one project can be probed.
+// WHEN IT RUNS: four times a day — 10:00, 13:00, 18:00 and 22:00 Asia/Kolkata —
+// from an external cron-job.org job calling GET /api/cron/openai. Deliberately
+// NOT on the 5-minute VM monitoring cron: every check is a billable OpenAI
+// request, and riding that tick cost 288 of them per project per day.
+//
+// There is no timer and no time-of-day logic in this file. `claimAccountsToCheck`
+// below hands out the work and caps how often any one project can be probed; the
+// schedule itself lives entirely in the external job's configuration.
 //
 // CHECK FREQUENCY IS NOT ALERT FREQUENCY, and the two must not be confused. The
-// probe runs every few minutes so a project that runs dry is noticed quickly.
-// The WhatsApp is governed instead by the per-recipient latch in `handleAlert`:
-// one message per recipient per no-credit episode, silence for as long as the
-// episode lasts, and a fresh message if it recovers and relapses.
+// WhatsApp is governed by the per-recipient latch in `handleAlert`: one message
+// per recipient per no-credit episode, silence for as long as the episode lasts,
+// and a fresh message if it recovers and relapses.
 
 import { exec, maybeOne, sql, updateById } from '@/lib/db';
 import { decrypt } from '@/lib/crypto';
@@ -93,14 +96,18 @@ export interface OpenAiAccountRow {
  * for N minutes IS a promise not to probe that project again for N minutes. See
  * claimAccountsToCheck, where a single condition expresses both.
  *
- * MUST STAY COMFORTABLY BELOW THE TICK INTERVAL. The trigger is the 5-minute
- * workflow in .github/workflows/monitor-cron.yml and GitHub's scheduler drifts,
- * so a tick can arrive slightly early. At exactly 5 minutes an early tick would
- * land inside the lease, be skipped, and halve the real cadence to 10 minutes.
- * Four minutes leaves a minute of slack. If that workflow's interval changes,
- * change this with it.
+ * THIS IS THE SPEND CAP. Every probe is a billable OpenAI request, and the
+ * trigger is an external cron-job.org job — configuration that lives outside
+ * this repository and can be edited by anyone with the account. An hour of
+ * exclusivity means a misconfigured schedule, a runaway retry or a leaked URL
+ * costs at most 24 probes per project per day instead of one per request.
+ *
+ * MUST STAY BELOW THE SMALLEST GAP BETWEEN SCHEDULED RUNS, which is 3 hours:
+ * the job fires at 10:00, 13:00, 18:00 and 22:00 Asia/Kolkata. At an hour there
+ * is a wide margin. Raise this past 3 hours and the 13:00 run starts being
+ * silently swallowed — the failure mode this feature has already had once.
  */
-export const MIN_CHECK_INTERVAL_MS = 4 * 60_000;
+export const MIN_CHECK_INTERVAL_MS = 60 * 60_000;
 
 /**
  * Turn one OpenAI HTTP response into a status.
@@ -476,10 +483,10 @@ function checkEach(accounts: OpenAiAccountRow[]): Promise<Array<CheckResult & { 
  *
  * ONE STATEMENT SELECTS AND CLAIMS, which is the whole point. Reading the rows
  * and then probing them would be a check-then-act with seconds of daylight in
- * between, and more than one thing calls this endpoint — the 5-minute workflow,
- * the daily Vercel backstop, a hand-run workflow_dispatch. Two overlapping
- * invocations would have both see the same project as ready, both spend a
- * billable request, and both send the same WhatsApp.
+ * between, and the trigger is an external service that can retry a request it
+ * believes timed out. Two overlapping invocations would both see the same
+ * project as ready, both spend a billable request, and both send the same
+ * WhatsApp.
  *
  * Why the race cannot happen here: under READ COMMITTED, a second UPDATE
  * reaching a row this one has locked blocks until this one commits, then
@@ -488,12 +495,13 @@ function checkEach(accounts: OpenAiAccountRow[]): Promise<Array<CheckResult & { 
  * second statement's result, and the second caller never sees it. Exactly one
  * invocation gets each project.
  *
- * THAT SAME CONDITION IS ALSO THE SCHEDULE. Because a claim is respected for
+ * THAT SAME CONDITION IS ALSO THE SPEND CAP. Because a claim is respected for
  * MIN_CHECK_INTERVAL_MS, no project can be probed more often than that however
- * often this endpoint is hit — so the 5-minute tick produces a 5-minute cadence
- * and nothing here has to know what time it is. This used to carry a second
- * condition, `last_checked_at < 09:00 IST today`, which made it a once-a-day
- * check; that gate is gone, and last_checked_at is now display-only.
+ * often this endpoint is hit — so the four scheduled runs a day all land, and a
+ * misconfigured or hostile caller still cannot run up a bill. Nothing here has
+ * to know what time it is. This used to carry a second condition,
+ * `last_checked_at < 09:00 IST today`, which made it a once-a-day check; that
+ * gate is gone, and last_checked_at is now display-only.
  *
  * Each statement is its own autocommit transaction, so nothing is held open
  * across the OpenAI HTTP call — which matters with PGPOOL_MAX=3. It is also
@@ -520,8 +528,8 @@ async function claimAccountsToCheck(): Promise<OpenAiAccountRow[]> {
 }
 
 /**
- * THE scheduled entry point, called on every tick of the 5-minute monitoring
- * cron (.github/workflows/monitor-cron.yml -> GET /api/cron/check-all).
+ * THE scheduled entry point, called four times a day by the external
+ * cron-job.org job (GET /api/cron/openai).
  *
  * Safe to call as often as you like: claimAccountsToCheck is what decides
  * whether a project is actually probed, and it will not hand the same project
@@ -530,9 +538,9 @@ async function claimAccountsToCheck(): Promise<OpenAiAccountRow[]> {
  * Projects with daily_check_enabled = false are excluded in SQL, so a disabled
  * project is never sent to OpenAI and can never produce a scheduled alert.
  *
- * CHECK FREQUENCY IS NOT ALERT FREQUENCY. This probes every few minutes; the
- * per-recipient latch in handleAlert is what keeps a sustained no-credit
- * episode to one WhatsApp per recipient.
+ * CHECK FREQUENCY IS NOT ALERT FREQUENCY. The per-recipient latch in handleAlert
+ * is what keeps a sustained no-credit episode to one WhatsApp per recipient,
+ * independently of how often this runs.
  */
 export async function runOpenAiChecks(): Promise<{ checked: number; claimed: number }> {
   // A deleted account cannot close its own incident — the claim below only

@@ -2,7 +2,6 @@ import { exec, sql } from './db';
 import { checkVm, checkApp } from './checks';
 import { syncCloudAccount } from './cloud-sync';
 import { runAlerts } from './alerts';
-import { runOpenAiChecks } from './openai-check';
 
 // Server-side scheduler. Started from instrumentation.ts when the Next server
 // boots, so checks run automatically even with no browser open. Stops when the
@@ -33,11 +32,10 @@ async function runChecks() {
     // after fresh statuses are written, evaluate alert conditions
     await runAlerts().catch((e) => console.error('[alerts] failed:', e?.message));
 
-    // OpenAI projects ride this same cycle, exactly as they do in production
-    // where /api/cron/check-all is the tick. Cheap when nothing is due: one
-    // UPDATE that claims no rows. runOpenAiChecks itself bounds how often any
-    // project is actually probed, so this interval can be anything.
-    await runOpenAiChecks().catch((e) => console.error('[openai] checks failed:', e?.message));
+    // NO OPENAI WORK HERE. Each OpenAI check is a billable request, so it runs
+    // four times a day from an external cron-job.org schedule hitting
+    // GET /api/cron/openai — not on this 5-minute cycle. A self-hosted install
+    // points the same external job at its own URL.
   } catch (e) {
     console.error('[scheduler] checks failed:', e instanceof Error ? e.message : e);
   } finally {
@@ -84,7 +82,7 @@ export function startScheduler() {
   const checkMs = Number(process.env.CHECK_INTERVAL_MS) || 300_000; // 5 min default
   const cloudMs = Number(process.env.CLOUD_SYNC_INTERVAL_MS) || 300_000; // 5 min
   console.log(
-    `[scheduler] started — checks every ${checkMs / 1000}s (VMs, apps, alerts, OpenAI), ` +
+    `[scheduler] started — checks every ${checkMs / 1000}s (VMs, apps, alerts), ` +
       `cloud sync every ${cloudMs / 1000}s`
   );
 
